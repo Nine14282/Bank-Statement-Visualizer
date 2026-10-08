@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 import config  # loads the project's env settings into os.environ
+from extract_ledger import BANKS
 
 # Anchor paths to this script's folder so it runs from any working directory.
 HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
@@ -28,11 +29,21 @@ OUT = os.path.join(WEB, "dist", "index.html")      # the dashboard
 
 # Secrets loaded from the settings file are NOT passed to npm: its install scripts and build plugins
 # (hundreds of third-party packages) would otherwise inherit them through the environment.
-SECRET_ENV = ("KTB_PW", "STATEMENT_PW", "KBANK_PW", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_PROJECT_ID")
+SECRET_ENV = (*(k for b in BANKS for k in b.passwords), "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_PROJECT_ID")
 
 # Optional labels shown in the dashboard sidebar (set in the env settings, see .env.example).
 ACCOUNT = os.environ.get("ACCOUNT_LABEL", "")
 NAME = os.environ.get("ACCOUNT_HOLDER", "")
+# Picked in the setup wizard: the dashboard's default theme (an id from web/src/lib/themes.ts), and the
+# expected-spending list that seeds the Expected Spending tab (the dashboard keeps later edits itself).
+EXPECTED = os.path.join(HERE, "expected.json")
+
+
+def expected():
+    try:
+        return json.load(open(EXPECTED, encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
 
 
 def find_gaps(tx):
@@ -96,7 +107,8 @@ def build(csv_path: str = CSV) -> None:
     gaps = find_gaps(tx) if tx else {"months": [], "breaks": []}
 
     payload = {"meta": {"account": ACCOUNT, "name": NAME, "from": tx[0]["date"] if tx else "",
-                        "to": tx[-1]["date"] if tx else "", "n": len(tx), "gaps": gaps},
+                        "to": tx[-1]["date"] if tx else "", "n": len(tx), "gaps": gaps,
+                        "theme": os.environ.get("THEME", ""), "plan": expected()},
                "tx": tx}
     os.makedirs(os.path.dirname(JSON_OUT), exist_ok=True)
     with open(JSON_OUT, "w", encoding="utf-8") as f:
@@ -124,7 +136,9 @@ def build(csv_path: str = CSV) -> None:
     if not npm:
         sys.exit("npm not found: install Node.js, then run `npm install` in web/ and re-run.")
     if not os.path.isdir(os.path.join(WEB, "node_modules")):
+        print("  Installing web packages (npm install), once…", flush=True)
         subprocess.run([npm, "install"], cwd=WEB, check=True, env=env)
+    print("  Building the web page (npm run build, a few seconds)…", flush=True)
     subprocess.run([npm, "run", "build"], cwd=WEB, check=True, stdout=subprocess.DEVNULL, env=env)
     print(f"Wrote {OUT}  ({os.path.getsize(OUT):,} bytes)")
 

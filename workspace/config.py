@@ -26,3 +26,26 @@ def load_env() -> None:
 
 
 load_env()
+
+
+def save(key: str, value: str) -> None:
+    """Set KEY=value in the settings file (replace the KEY= line, else append) and in os.environ.
+    Used by the setup wizard; the file stays readable by you only."""
+    if not key.replace("_", "").isalnum() or "\n" in value or "\r" in value:
+        raise ValueError("bad setting")
+    lines = open(ENVFILE, encoding="utf-8").read().splitlines() if os.path.exists(ENVFILE) else []
+    out, done = [], False
+    for line in lines:
+        if line.strip().removeprefix("export ").partition("=")[0].strip() == key:
+            if not done:
+                out.append(f"{key}={value}")
+                done = True
+            continue
+        out.append(line)
+    if not done:
+        out.append(f"{key}={value}")
+    fd = os.open(ENVFILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
+    os.chmod(ENVFILE, 0o600)
+    os.environ[key] = value

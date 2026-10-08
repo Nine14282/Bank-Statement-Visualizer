@@ -1,5 +1,6 @@
 # Personal financial data - never commit
 workspace/*.csv
+workspace/expected.json
 web/src/data/
 Statement/
 
