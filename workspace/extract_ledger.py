@@ -10,9 +10,13 @@ Columns: Date, Description, Category, Amount, Balance, ID, Bank
 
 Usage:
     python extract_ledger.py [INPUT_PDF] [OUTPUT_CSV]
+    python extract_ledger.py IN.pdf OUT.csv --password=...
+The password comes from --password=, else KBANK_PW for STM_* files / KTB_PW for others (see
+.env.example), else it is asked for (typed, hidden).
 Defaults: statement_clean.pdf -> ledger.csv
 """
 import csv
+import getpass
 import os
 import re
 import sys
@@ -267,6 +271,18 @@ def parse_kbank(pdf_path: str, password: str | None = None):
     return out
 
 
+def is_kbank(path: str) -> bool:
+    """KBank statements are named STM_...; Gmail downloads prefix the name with 8 hex chars + '_'."""
+    return re.sub(r"^[0-9a-f]{8}_", "", os.path.basename(path)).startswith("STM")
+
+
+def password_for(path: str) -> str | None:
+    """The settings password for this file's bank (STATEMENT_PW is the old name of KTB_PW)."""
+    if is_kbank(path):
+        return os.environ.get("KBANK_PW") or None
+    return os.environ.get("KTB_PW") or os.environ.get("STATEMENT_PW") or None
+
+
 def bank_of(pdf_path: str, password: str | None = None) -> str:
     with pdfplumber.open(pdf_path, password=password) as pdf:
         text = pdf.pages[0].extract_text() or ""
@@ -288,10 +304,26 @@ def write_csv(rows, dst):
 
 
 def main() -> int:
-    src = sys.argv[1] if len(sys.argv) > 1 else "statement_clean.pdf"
-    dst = sys.argv[2] if len(sys.argv) > 2 else "ledger.csv"
+    args = [a for a in sys.argv[1:] if not a.startswith("--password=")]
+    src = args[0] if len(args) > 0 else "statement_clean.pdf"
+    dst = args[1] if len(args) > 1 else "ledger.csv"
 
-    rows, stats = build_rows(parse(src))
+    # --password= wins, then the settings password for this file's bank, then ask.
+    typed = [a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--password=")]
+    pw = typed[0] if typed else password_for(src)
+    try:
+        bank_of(src, pw)
+    except Exception:           # wrong/missing password (the error type varies by PDF): ask, if someone can answer
+        if not sys.stdin.isatty():
+            raise
+        pw = getpass.getpass(f"{'KBank' if is_kbank(src) else 'KTB'} password for {os.path.basename(src)}: ")
+    if bank_of(src, pw) == "KBANK":
+        rows = parse_kbank(src, pw)
+        stamp_ids(rows)
+        write_csv(rows, dst)
+        print(f"Wrote {len(rows)} KBank transactions to {dst} (totals match the statement)")
+        return 0
+    rows, stats = build_rows(parse(src, pw))
     stamp_ids(rows)
     write_csv(rows, dst)
 
