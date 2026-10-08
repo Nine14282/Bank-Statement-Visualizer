@@ -4,7 +4,7 @@
 #
 #   ./gmail.sh                    fetch + build
 #   ./gmail.sh --no-build         only download the PDFs
-# Unattended (cron): put STATEMENT_PW in .env first, and run ./gmail.sh once by hand to authorise.
+# Unattended (cron): put KTB_PW / KBANK_PW in .env first, and run ./gmail.sh once by hand to authorise.
 set -euo pipefail
 cd "$(dirname "$0")"
 umask 077   # files we create (ledger, token, dashboard, settings) are readable by you only

@@ -2,7 +2,7 @@
 # Option 1 (manual): statement PDFs you put in Statement/ -> ledger.csv -> web/dist/index.html
 #
 #   ./run.sh                      asks for the PDF password when a file needs one
-#   STATEMENT_PW=... ./run.sh     or set STATEMENT_PW in .env (never typed again)
+#   KTB_PW=... KBANK_PW=... ./run.sh   or set KTB_PW / KBANK_PW in .env (never typed again)
 #   ./run.sh --password=...       or pass it on the command line (visible in shell history)
 set -euo pipefail
 cd "$(dirname "$0")"

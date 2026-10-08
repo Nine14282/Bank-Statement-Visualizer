@@ -1,14 +1,16 @@
 # Income & Expense Ledger
 
-Turns your **Krungthai (KTB) statement PDFs** into one merged ledger and an offline dashboard
+Turns your **Krungthai (KTB) and Kasikorn (KBank) statement PDFs** into one merged ledger and an offline dashboard
 (`web/dist/index.html`): income vs expense, balance over time, categories, monthly spend rate,
 a searchable transaction table, and a warning if a statement month looks missing.
 
 Everything runs on your machine. Nothing is uploaded. The only network use is the optional
 read-only Gmail download.
 
-> Supports Krungthai's Thai statement PDFs only (the parser reads that layout). Linux and macOS;
-> on Windows use WSL.
+> Supports Krungthai's and KBank's Thai statement PDFs (the parsers read those layouts; the bank is
+> detected per file). Both accounts go into one ledger; each row shows which bank it came from, and
+> transfers between the two accounts are marked "Own transfer" and left out of income and spending.
+> Linux and macOS; on Windows use WSL.
 
 ## Setup (once)
 
@@ -29,12 +31,14 @@ Re-running setup is safe.
 2. Run `./run.sh`.
 3. Open `web/dist/index.html` in a browser.
 
-**PDF password** (Krungthai PDFs are usually encrypted). Pick one:
+**PDF password** (bank PDFs are usually encrypted). KTB and KBank use different passwords:
+`KTB_PW` and `KBANK_PW`. KBank files are the ones named `STM_...`; each file tries its own bank's
+password first. Pick one:
 
 | How | When |
 |---|---|
 | Do nothing | `./run.sh` asks (typed, hidden) the first time a file needs it |
-| `STATEMENT_PW=yourpassword` in `.env` | never asked again |
+| `KTB_PW=...` and `KBANK_PW=...` in `.env` | never asked again |
 | `./run.sh --password=yourpassword` | one-off, but it stays in shell history and shows in `ps` to other users of the machine |
 
 Run it again whenever you add a new PDF. Duplicates are dropped automatically, so overlapping
@@ -75,7 +79,7 @@ Notes:
   an old statement email), for example `from:<bank sender address> has:attachment filename:pdf`.
   `./gmail.sh` prints the sender of every PDF it downloads so you can check.
 - Work or university Google accounts may block third-party apps. Use a personal Gmail if so.
-- **Unattended**: set `STATEMENT_PW` in `.env` (nobody can type it), run `./gmail.sh` once by
+- **Unattended**: set `KTB_PW` and `KBANK_PW` in `.env` (nobody can type it), run `./gmail.sh` once by
   hand so the login exists, then schedule it, for example hourly with `crontab -e`:
   `0 * * * * cd /path/to/this/folder && ./gmail.sh >> gmail.log 2>&1`
 
@@ -111,8 +115,10 @@ commit the code. The dashboard file contains your transactions: share it only on
 - **"No PDFs in Statement/"** → copy your statements there first.
 - **"Data may be missing" on the dashboard** → a statement for that period isn't in `Statement/`
   (or the balance doesn't add up across a gap). Add it and run again.
-- **Wrong password** → the file is skipped and listed in the output; check `STATEMENT_PW`.
-- **A PDF isn't read / amounts look wrong** → only Krungthai's layout is supported.
+- **Wrong password** → you are asked for that file's password; unattended runs stop without touching
+  the ledger. Check `KTB_PW` / `KBANK_PW`.
+- **A PDF isn't read / amounts look wrong** → only Krungthai's and KBank's layouts are supported. A
+  KBank file whose rows don't add up to the statement's own totals is rejected rather than half-read.
 - **`npm not found`** → install Node.js 20+, then `./setup.sh`.
 
 ## Security notes
