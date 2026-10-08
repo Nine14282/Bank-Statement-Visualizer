@@ -1,4 +1,4 @@
-# Income & Expense Ledger
+# Statement Visualizer
 
 Turns your **Krungthai (KTB) and Kasikorn (KBank) statement PDFs** into one merged ledger and an offline dashboard
 (`web/dist/index.html`): income vs expense, balance over time, categories, monthly spend rate,
@@ -12,22 +12,35 @@ read-only Gmail download.
 > transfers between the two accounts are marked "Own transfer" and left out of income and spending.
 > Linux and macOS; on Windows use WSL.
 
-## Setup (once)
+## Quick start
 
 Needs Python 3.10+, Node.js 20+ and npm.
 
 ```bash
-./setup.sh
+./run.sh
 ```
 
-It creates `.venv`, installs the Python and web packages, creates a private `.env` from
-`.env.example`, and builds the dashboard. With no data yet, `web/dist/index.html` is a blank
-"No data yet" page that tells you the next steps; it fills in as soon as you add statements.
-Re-running setup is safe.
+The first run installs everything (`./setup.sh`: `.venv`, Python and web packages, a private `.env`
+from `.env.example`) and opens a **setup page** in your browser. One screen per step, **Next** to go on:
+
+1. **Welcome.**
+2. **Statements** (required): drop in one or more statement PDFs; they are copied into `Statement/`.
+3. **Passwords**: each file's bank is detected (file name, or the PDF's own text; if neither tells,
+   you pick it). Enter one password per bank; it is checked by opening and reading the files. Tick
+   *Remember on this computer* to save it in `.env` (needed for unattended runs), otherwise it is used
+   for this run only.
+4. **Theme**: Midnight (dark) or Daylight (light). Switch later with the sun / moon button.
+5. **Expected spending** (optional): what you spend every day or every month; it becomes the full
+   bar of "Spent this month" (edit it later in the dashboard's Expected Spending tab).
+6. **Gmail tips** for automatic downloads, then **Build my dashboard**: the ledger is built and the
+   dashboard opens; the setup page's little local server stops.
+
+After that, `./run.sh` just rebuilds from `Statement/` (no setup page). `./run.sh --setup` opens the
+setup page again, for example to add a statement or change the theme. Re-running `./setup.sh` is safe.
 
 ## Option 1: add statements yourself
 
-1. Put your statement PDFs in `Statement/`.
+1. Put your statement PDFs in `Statement/` (or add them on the setup page: `./run.sh --setup`).
 2. Run `./run.sh`.
 3. Open `web/dist/index.html` in a browser.
 
@@ -38,6 +51,7 @@ password first. Pick one:
 | How | When |
 |---|---|
 | Do nothing | `./run.sh` asks (typed, hidden) the first time a file needs it |
+| Tick *Remember* on the setup page | saved in `.env` for you, never asked again |
 | `KTB_PW=...` and `KBANK_PW=...` in `.env` | never asked again |
 | `./run.sh --password=yourpassword` | one-off, but it stays in shell history and shows in `ps` to other users of the machine |
 
@@ -88,6 +102,7 @@ Notes:
 | Setting | Effect |
 |---|---|
 | `ACCOUNT_LABEL`, `ACCOUNT_HOLDER` | text shown in the dashboard sidebar |
+| `THEME` | the dashboard's default theme (`midnight` or `daylight`); the setup page sets it |
 | `LEDGER_CASH_REF` | account number in the transaction detail for *your own cash channel* → "Cash withdrawal / Cash deposit" |
 | `LEDGER_PEER_REF` | a person you lend to → "Lent out / Loan repaid to me" |
 | `LEDGER_STOCK_REF` | your investment account → "Stock investment / Stock return" |
@@ -101,6 +116,7 @@ Hand-entered spends with no bank record go in `workspace/manual_entries.csv`
 ```
 Statement/                  your PDFs            (git-ignored)
 workspace/ledger.csv        the merged ledger    (git-ignored)
+workspace/expected.json     expected spending from the setup page (git-ignored)
 workspace/token.json        cached Gmail login   (git-ignored, secret)
 .env                        your settings        (git-ignored, secret)
 web/dist/index.html         the dashboard        (generated, git-ignored)
@@ -112,13 +128,16 @@ commit the code. The dashboard file contains your transactions: share it only on
 ## Troubleshooting
 
 - **"Not set up yet"** → run `./setup.sh`.
-- **"No PDFs in Statement/"** → copy your statements there first.
+- **"No PDFs in Statement/"** → add them with `./run.sh --setup`, or copy them there first.
+- **The setup page didn't open** → open the `http://127.0.0.1:…/?setup=…` link that `./run.sh` printed.
+  It only works while `./run.sh` is running (Ctrl+C there stops it).
 - **"Data may be missing" on the dashboard** → a statement for that period isn't in `Statement/`
   (or the balance doesn't add up across a gap). Add it and run again.
 - **Wrong password** → you are asked for that file's password; unattended runs stop without touching
   the ledger. Check `KTB_PW` / `KBANK_PW`.
-- **A PDF isn't read / amounts look wrong** → only Krungthai's and KBank's layouts are supported. A
-  KBank file whose rows don't add up to the statement's own totals is rejected rather than half-read.
+- **A PDF isn't read / amounts look wrong** → only Krungthai's and KBank's layouts are supported. Every
+  row is still imported; a row that doesn't agree with the statement's own balances or totals is printed as
+  `CHECK <file>: …` (the statement is right, so that row was misread). Send that line along when reporting it.
 - **`npm not found`** → install Node.js 20+, then `./setup.sh`.
 
 ## Security notes
@@ -129,3 +148,15 @@ commit the code. The dashboard file contains your transactions: share it only on
   you only and are git-ignored. The dashboard file contains all your transactions: don't share it.
 - Statement PDFs are parsed locally. Only run this on statements from your own bank.
 - Secrets from `.env` are not passed on to `npm` when the dashboard is built.
+- The setup page talks to a small server that `./run.sh` starts only for setup: it listens on
+  127.0.0.1 (this computer only) on a random port, answers only requests carrying the random token in
+  the printed link, and stops when setup finishes. Passwords stay in its memory unless you tick
+  *Remember*.
+
+## Adding a bank
+
+Reading statements: one `Bank(...)` entry in `BANKS` in `workspace/extract_ledger.py` (id, name, password
+setting, file-name pattern, text that identifies its PDFs, parser). The setup page, password lookup and
+build all read that list. Showing it: one entry in `web/src/lib/banks.ts` (name, card colour, logo).
+Themes work the same way: one entry in `web/src/lib/themes.ts`, plus a `[data-theme="…"]` block in
+`web/src/index.css` for colours beyond the light/dark base.
