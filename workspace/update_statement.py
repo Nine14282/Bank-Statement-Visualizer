@@ -11,24 +11,27 @@ Drop a new statement PDF into Statement/ and run this single script. It:
 Everything stays on your machine; nothing is uploaded. Open the resulting
 web/dist/index.html in any browser (works offline).
 
-Encrypted PDFs are unlocked on the fly. The password is taken from --password,
-then the STATEMENT_PW environment variable, then an interactive prompt (asked
+Encrypted PDFs are unlocked on the fly. KTB and KBank use different passwords: KTB_PW and
+KBANK_PW. KBank files are named STM_... (Gmail downloads add an 8-character message-id prefix),
+so each file tries its own bank's password first, then the other, then --password= / a typed
+one, then an interactive prompt (asked
 once and reused for every encrypted file).
 
 Usage:
     python update_statement.py [STATEMENT_DIR] [OUTPUT_CSV]
-    STATEMENT_PW=xxxx python update_statement.py
+    KTB_PW=xxxx KBANK_PW=yyyy python update_statement.py
 Defaults: Statement/ -> ledger.csv -> web/dist/index.html
 """
 import csv
 import getpass
 import glob
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 
 import build_dashboard
-import config  # loads the project's env settings (STATEMENT_PW, ...) into os.environ
+import config  # loads the project's env settings (KTB_PW, KBANK_PW, ...) into os.environ
 from extract_ledger import extract, write_csv
 from txid import differences, stamp_ids
 
@@ -37,30 +40,67 @@ HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
 ROOT = os.path.dirname(HERE)                         # project root
 
 
-def get_password(cache=[]):
-    """Resolve the statement password once, then reuse it."""
-    if cache:
-        return cache[0]
-    pw = None
-    for a in sys.argv[1:]:
-        if a.startswith("--password="):
-            pw = a.split("=", 1)[1]
-    pw = pw or os.environ.get("STATEMENT_PW")
-    if not pw:
-        if not sys.stdin.isatty():   # cron / watcher: nobody to ask
-            sys.exit("A statement PDF is password-protected. Set STATEMENT_PW in the env "
-                     "settings (see .env.example) or run this by hand to type it.")
-        pw = getpass.getpass("Statement password (for encrypted PDFs): ")
-    cache.append(pw)
-    return pw
+def passwords(cache=[]):
+    """--password= and passwords typed during this run, reused for the next files."""
+    if not cache:
+        cache += [a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--password=")]
+    return cache
+
+
+def is_kbank(path):
+    """KBank statements are named STM_...; Gmail downloads prefix the name with 8 hex chars + '_'."""
+    return re.sub(r"^[0-9a-f]{8}_", "", os.path.basename(path)).startswith("STM")
+
+
+def candidates(path):
+    """Passwords to try for one file, its own bank's first. STATEMENT_PW is the old name of KTB_PW."""
+    ktb, kbank = os.environ.get("KTB_PW") or os.environ.get("STATEMENT_PW"), os.environ.get("KBANK_PW")
+    own, other = (kbank, ktb) if is_kbank(path) else (ktb, kbank)
+    out = []
+    for pw in (None, own, other, *passwords()):   # None: the file may not be encrypted
+        if pw not in out and (pw is None or pw):
+            out.append(pw)
+    return out
 
 
 def load(path):
-    """Extract rows from a PDF, trying without a password first."""
-    try:
-        return extract(path)
-    except Exception:
-        return extract(path, get_password())
+    """Extract rows from a PDF: no password, then each known password, then ask (if someone can answer)."""
+    from pdfminer.pdfdocument import PDFPasswordIncorrect
+    for pw in candidates(path):
+        try:
+            return extract(path, pw)
+        except Exception as e:      # pdfplumber wraps PDFPasswordIncorrect in a PdfminerException
+            if not any(isinstance(x, PDFPasswordIncorrect) for x in (e, *e.args)):
+                raise              # a real parse problem: let main() report it, don't hide it
+    if not sys.stdin.isatty():      # cron / watcher: nobody to ask. Stop rather than write a ledger missing this file.
+        sys.exit(f"No known password opens {os.path.basename(path)}. Set KTB_PW / KBANK_PW in the env "
+                 "settings (see .env.example) or run this by hand to type it. Ledger left unchanged.")
+    pw = getpass.getpass(f"{'KBank' if is_kbank(path) else 'KTB'} password for {os.path.basename(path)}: ")
+    rows = extract(path, pw)
+    passwords().append(pw)          # reuse for the next file
+    return rows
+
+
+def own_transfers(rows):
+    """Money moved between your own accounts (KTB <-> KBank) is neither income nor spending.
+
+    A pair = same amount, opposite direction, different banks, within 2 minutes. Both rows become
+    "Own transfer", which the dashboard leaves out of income, expenses and the spend rate.
+    ponytail: greedy 1:1 scan; an unrelated same-amount pair inside 2 minutes would also match.
+    """
+    when = lambda r: datetime.strptime(r["Date"], "%Y-%m-%d %H:%M")
+    banks = [r for r in rows if r.get("Bank") not in (None, "", "Manual")]
+    used = set()
+    for a in banks:
+        if float(a["Amount"]) >= 0 or a["ID"] in used:
+            continue
+        b = next((b for b in banks if b["ID"] not in used and b["Bank"] != a["Bank"]
+                  and abs(float(b["Amount"]) + float(a["Amount"])) < 0.005
+                  and abs(when(b) - when(a)) <= timedelta(minutes=2)), None)
+        if b:
+            used |= {a["ID"], b["ID"]}
+            a["Category"] = b["Category"] = "Own transfer"
+            print(f"  own transfer: {a['Date']} {a['Bank']} -> {b['Bank']} {-float(a['Amount']):,.2f}")
 
 
 def main() -> int:
@@ -98,7 +138,10 @@ def main() -> int:
     # Hand-entered rows (spends no bank record covers) live in manual_entries.csv.
     manual = os.path.join(HERE, "manual_entries.csv")
     if os.path.exists(manual):
-        extra = stamp_ids(list(csv.DictReader(open(manual, encoding="utf-8-sig"))))
+        extra = list(csv.DictReader(open(manual, encoding="utf-8-sig")))
+        for r in extra:   # payment emails come from Krungthai NEXT; anything else was typed by hand
+            r["Bank"] = "KTB" if "(email)" in r["Description"] else "Manual"
+        extra = stamp_ids(extra)
         added = 0
         stmt = list(merged)          # statement rows only (before any manual row is added)
         claimed = set()              # statement rows already matched to a manual row
@@ -113,7 +156,7 @@ def main() -> int:
                 # Payment-notice emails carry the payment time, but the statement can post bills minutes to
                 # hours later. Same amount within 4h of a not-yet-matched statement row = same transaction.
                 # ponytail: 4h window, 1:1 greedy; widen/narrow if bills post later/earlier than that
-                hit = next((s for s in stmt if s["ID"] not in claimed
+                hit = next((s for s in stmt if s["ID"] not in claimed and s.get("Bank") == "KTB"
                             and float(s["Amount"]) == float(r["Amount"])
                             and abs(when(s) - when(r)) <= timedelta(hours=4)), None)
                 if hit:
@@ -140,6 +183,7 @@ def main() -> int:
             print(f"    {c}")
     assert len({r["ID"] for r in merged}) == len(merged), "duplicate transaction IDs after merge"
 
+    own_transfers(merged)
     merged.sort(key=lambda r: (r["Date"], r["Balance"]))
     write_csv(merged, dst)
 

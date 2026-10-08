@@ -7,7 +7,7 @@ own — no command to type. Everything stays local.
 
 The bank password is needed to unlock encrypted PDFs. Set it once so the watcher
 can run unattended:
-    STATEMENT_PW=xxxx python watch_statements.py
+    KTB_PW=xxxx KBANK_PW=yyyy python watch_statements.py
 Otherwise it prompts once at startup.
 
 Usage:
@@ -59,9 +59,9 @@ def main():
         return 1
 
     # Resolve the password up front so unattended runs never block on a prompt.
-    if "STATEMENT_PW" not in os.environ:
-        os.environ["STATEMENT_PW"] = getpass.getpass(
-            "Statement password (leave blank if PDFs are already unlocked): ")
+    if not (os.environ.get("KTB_PW") or os.environ.get("STATEMENT_PW")):
+        os.environ["KTB_PW"] = getpass.getpass(
+            "KTB statement password (leave blank if PDFs are already unlocked): ")
 
     print(f"Watching {folder}/ for new statements — Ctrl-C to stop.")
     prev = snapshot(folder)

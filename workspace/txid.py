@@ -12,6 +12,10 @@ ID = first 16 hex chars of sha256 over "<yyyymmdd> <hhmm> <money>#<n>"
                  get n=1 and n=2. The same statement rows always number the same way, so the
                  copy of a transaction in an overlapping statement gets the same ID.
 
+Rows of another bank (Bank column other than KTB/Manual, e.g. KBANK) get the bank name in front of
+the key, so a KTB and a KBank payment in the same minute with the same amount never share an ID.
+KTB and manual rows keep the plain key: payment emails must match their KTB statement rows.
+
 Rows with equal IDs are the same transaction. `differences()` reports when two copies disagree
 (balance or description), and a hash collision between two different keys raises an error.
 
@@ -42,6 +46,8 @@ def stamp_ids(rows):
     seen: dict[str, int] = {}
     for r in rows:
         base = base_key(r["Date"], r["Amount"])
+        if r.get("Bank") not in (None, "", "KTB", "Manual"):
+            base = f"{r['Bank']} {base}"
         seen[base] = seen.get(base, 0) + 1
         r["ID"] = tx_id(base, seen[base])
     return rows
@@ -79,6 +85,10 @@ if __name__ == "__main__":
     # an overlapping statement numbers the same rows the same way -> same IDs -> duplicates found
     b = stamp_ids([{"Date": "2025-10-12 19:05", "Amount": -20.0}, {"Date": "2025-10-12 19:05", "Amount": -20.0}])
     assert [r["ID"] for r in b] == [r["ID"] for r in a[:2]]
+    # another bank's identical-looking row is a different transaction; KTB/manual rows share keys
+    k = stamp_ids([{"Date": "2025-10-12 19:05", "Amount": -20.0, "Bank": "KBANK"}])
+    assert k[0]["ID"] != a[0]["ID"]
+    assert stamp_ids([{"Date": "2025-10-12 19:05", "Amount": -20.0, "Bank": "KTB"}])[0]["ID"] == a[0]["ID"]
     # conflict reporting
     assert differences({"Balance": 10, "Description": "x  y"}, {"Balance": "10.00", "Description": "x y"}) == []
     assert differences({"Balance": 10, "Description": "x"}, {"Balance": 11, "Description": "z"}) == \

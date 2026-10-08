@@ -28,7 +28,7 @@ OUT = os.path.join(WEB, "dist", "index.html")      # the dashboard
 
 # Secrets loaded from the settings file are NOT passed to npm: its install scripts and build plugins
 # (hundreds of third-party packages) would otherwise inherit them through the environment.
-SECRET_ENV = ("STATEMENT_PW", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_PROJECT_ID")
+SECRET_ENV = ("KTB_PW", "STATEMENT_PW", "KBANK_PW", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_PROJECT_ID")
 
 # Optional labels shown in the dashboard sidebar (set in the env settings, see .env.example).
 ACCOUNT = os.environ.get("ACCOUNT_LABEL", "")
@@ -51,19 +51,22 @@ def find_gaps(tx):
             months.append(k)
         y, m = (y + 1, 1) if m == 12 else (y, m + 1)
 
-    breaks, cur, cur_date = [], None, None
-    bal_rows = [t for t in tx if t["bal"] is not None]   # manual rows carry no balance
-    for minute in sorted({t["date"] for t in bal_rows}):
-        rem = [t for t in bal_rows if t["date"] == minute]
-        while rem:
-            nxt = next((t for t in rem
-                        if cur is None or abs(cur + t["amt"] - t["bal"]) < 0.011), None)
-            if nxt is None:                      # nothing chains: record the jump, resync
-                nxt = rem[0]
-                breaks.append({"after": cur_date, "before": minute,
-                               "missing": round(nxt["bal"] - nxt["amt"] - cur, 2)})
-            rem.remove(nxt)
-            cur, cur_date = nxt["bal"], minute
+    breaks = []
+    for bank in sorted({t["bank"] for t in tx}):   # each account has its own balance chain
+        cur, cur_date = None, None
+        bal_rows = [t for t in tx if t["bal"] is not None and t["bank"] == bank]   # manual rows carry no balance
+        for minute in sorted({t["date"] for t in bal_rows}):
+            rem = [t for t in bal_rows if t["date"] == minute]
+            while rem:
+                nxt = next((t for t in rem
+                            if cur is None or abs(cur + t["amt"] - t["bal"]) < 0.011), None)
+                if nxt is None:                      # nothing chains: record the jump, resync
+                    nxt = rem[0]
+                    breaks.append({"after": cur_date, "before": minute, "bank": bank,
+                                   "missing": round(nxt["bal"] - nxt["amt"] - cur, 2)})
+                rem.remove(nxt)
+                cur, cur_date = nxt["bal"], minute
+    breaks.sort(key=lambda b: b["before"])
     # Rows posted out of order around midnight/month-end show up as a jump and an
     # equal and opposite jump a few rows later. A run of nearby jumps that nets to
     # zero moved no money, so drop it; what survives is genuinely missing.
@@ -87,7 +90,8 @@ def build(csv_path: str = CSV) -> None:
         print(f"  WARNING: {len(ids) - len(set(ids))} duplicate transaction ID(s) in ledger.csv; re-run ./run.sh")
 
     tx = [{"date": r["Date"], "desc": r["Description"], "cat": r["Category"],
-           "amt": round(float(r["Amount"]), 2), "bal": round(float(r["Balance"]), 2) if r["Balance"] else None}
+           "amt": round(float(r["Amount"]), 2), "bal": round(float(r["Balance"]), 2) if r["Balance"] else None,
+           "bank": r.get("Bank") or "KTB"}   # ledgers written before the Bank column were KTB-only
           for r in rows]
     gaps = find_gaps(tx) if tx else {"months": [], "breaks": []}
 
@@ -110,7 +114,7 @@ def build(csv_path: str = CSV) -> None:
         for m in gaps["months"]:
             print(f"  WARNING missing month: {m}")
         for b in gaps["breaks"]:
-            print(f"  WARNING balance jump {b['after']} -> {b['before']}: "
+            print(f"  WARNING {b['bank']} balance jump {b['after']} -> {b['before']}: "
                   f"{b['missing']:+,.2f} not in ledger")
         if not gaps["months"] and not gaps["breaks"]:
             print("  Coverage OK: no empty months, balance continuous")

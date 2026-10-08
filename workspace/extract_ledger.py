@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Extract a Krungthai bank-statement PDF into a clean CSV ledger.
+"""Extract a Krungthai (KTB) or Kasikorn (KBank) statement PDF into a clean CSV ledger.
 
-Columns: Date, Description, Amount, Balance
+Columns: Date, Description, Category, Amount, Balance, ID, Bank
   - Amount is signed: deposits positive (income), withdrawals negative (expense).
-  - Withdrawal vs deposit is decided by the amount's x-position under the
+  - KTB: withdrawal vs deposit is decided by the amount's x-position under the
     statement's own column headers, not by guessing.
+  - KBank: decided by the balance change, cross-checked against the x-position and
+    the statement's own totals (a mismatch rejects the file).
 
 Usage:
     python extract_ledger.py [INPUT_PDF] [OUTPUT_CSV]
@@ -45,6 +47,11 @@ TYPE_EN = {
     "เงินโอนเข้า": "Transfer in",
     "ดอกเบี้ยและภาษี": "Interest & tax",
     "ฝากเงินผ่าน ADM": "ADM cash deposit",
+    # KBank
+    "ชำระเงิน": "Bill / purchase",
+    "โอนเงิน": "Transfer out",
+    "รับโอนเงิน": "Transfer in",
+    "รับดอกเบี้ยเงินฝาก": "Interest & tax",
 }
 
 # Statement footer boilerplate that can bleed into a last-of-page row's detail.
@@ -133,7 +140,7 @@ def parse(pdf_path: str, password: str | None = None):
     return records
 
 
-HEADER = ["Date", "Description", "Category", "Amount", "Balance", "ID"]   # ID: see txid.py
+HEADER = ["Date", "Description", "Category", "Amount", "Balance", "ID", "Bank"]   # ID: see txid.py
 
 
 def build_rows(records):
@@ -165,14 +172,111 @@ def build_rows(records):
             "Category": categorize(desc, amount),
             "Amount": f"{amount:.2f}",
             "Balance": f"{r['bal']:.2f}" if r["bal"] is not None else "",
+            "Bank": "KTB",
         })
     stats = {"wd_n": wd_n, "wd_sum": wd_sum, "dep_n": dep_n,
              "dep_sum": dep_sum, "warnings": warnings}
     return rows, stats
 
 
+# --- KBank (Kasikorn) -------------------------------------------------------------------------
+# One amount column for both directions: money out sits left (right edge ~252), money in is
+# right-aligned (~267); balance ends ~329; channel starts ~333; detail starts ~404.
+KB_DATE = re.compile(r"^\d{2}-\d{2}-\d{2}$")   # DD-MM-YY, Christian era
+KB_OUT_MAX, KB_AMT_MAX, KB_BAL_MAX = 260, 300, 335   # right edge (x1) boundaries
+KB_CHAN_MIN, KB_DETAIL_MIN = 330, 400                # left edge (x0) boundaries
+
+
+def _num(t: str) -> float:
+    return float(t.replace(",", ""))
+
+
+def parse_kbank(pdf_path: str, password: str | None = None):
+    """KBank statement -> ledger rows. Raises ValueError if the rows don't add up to the statement's totals."""
+    rows, cur, prev, opening = [], None, None, None
+    with pdfplumber.open(pdf_path, password=password) as pdf:
+        head = pdf.pages[0].extract_text() or ""
+        for pg in pdf.pages:
+            last_top = None
+            for line in group_lines(pg.extract_words()):
+                if KB_DATE.match(line[0]["text"]):
+                    cur = {"date": line[0]["text"], "time": "", "desc": [], "chan": [], "detail": [],
+                           "amt": None, "out_pos": None, "bal": None}
+                    rows.append(cur)
+                    cols = line[1:]
+                elif cur is not None and last_top is not None and line[0]["top"] - last_top <= 14:
+                    cols = line   # wrapped text belonging to the row above
+                else:
+                    continue      # header, totals, footer
+                last_top = line[0]["top"]
+                for w in cols:
+                    t, x0, x1 = w["text"], w["x0"], w["x1"]
+                    if TIME.match(t) and x0 < 120 and not cur["time"]:
+                        cur["time"] = t
+                    elif MONEY.match(t) and x1 <= KB_AMT_MAX:
+                        cur["amt"], cur["out_pos"] = _num(t), x1 < KB_OUT_MAX
+                    elif MONEY.match(t) and x1 <= KB_BAL_MAX:
+                        cur["bal"] = _num(t)
+                    elif x0 >= KB_DETAIL_MIN:
+                        cur["detail"].append(t)
+                    elif x0 >= KB_CHAN_MIN:
+                        cur["chan"].append(t)
+                    else:
+                        cur["desc"].append(t)
+            cur = None   # never continue a row across a page break
+
+    out, wd_sum, dep_sum = [], 0.0, 0.0
+    for r in rows:
+        if r["amt"] is None:              # ยอดยกมา: opening balance, not a transaction
+            opening = r["bal"] if opening is None else opening
+            prev = r["bal"]
+            continue
+        sign = -1 if r["out_pos"] else 1
+        if prev is not None and abs(abs(r["bal"] - prev) - r["amt"]) < 0.011:
+            by_balance = -1 if r["bal"] < prev else 1
+            if by_balance != sign:
+                raise ValueError(f"KBank {r['date']} {r['time']}: column position and balance disagree on direction")
+            sign = by_balance
+        elif prev is not None:
+            raise ValueError(f"KBank {r['date']} {r['time']}: balance jump {prev:.2f} -> {r['bal']:.2f} "
+                             f"for amount {r['amt']:.2f}")
+        prev = r["bal"]
+        amount = sign * r["amt"]
+        wd_sum, dep_sum = wd_sum + (r["amt"] if sign < 0 else 0), dep_sum + (r["amt"] if sign > 0 else 0)
+        dd, mm, yy = r["date"].split("-")
+        desc = " ".join(r["desc"])
+        if r["chan"]:
+            desc += f" ({' '.join(r['chan'])})"
+        if r["detail"]:
+            desc += " " + " ".join(r["detail"])
+        out.append({"Date": f"20{yy}-{mm}-{dd} {r['time']}".strip(), "Description": desc,
+                    "Category": categorize(desc, amount), "Amount": f"{amount:.2f}",
+                    "Balance": f"{r['bal']:.2f}", "Bank": "KBANK"})
+
+    # The statement prints its own totals; the parsed rows must reproduce them exactly.
+    def total(label):
+        m = re.search(label + r"\s+\d+\s+รายการ\s+([\d,]+\.\d{2})", head)
+        return _num(m.group(1)) if m else 0.0
+    end = re.search(r"ยอดยกไป\s+([\d,]+\.\d{2})", head)
+    checks = [("withdrawals", wd_sum, total("รวมถอนเงิน")), ("deposits", dep_sum, total("รวมฝากเงิน"))]
+    if end and prev is not None:
+        checks.append(("closing balance", prev, _num(end.group(1))))
+    for what, got, want in checks:
+        if abs(got - want) > 0.011:
+            raise ValueError(f"KBank {what}: parsed {got:,.2f} but the statement says {want:,.2f}")
+    return out
+
+
+def bank_of(pdf_path: str, password: str | None = None) -> str:
+    with pdfplumber.open(pdf_path, password=password) as pdf:
+        text = pdf.pages[0].extract_text() or ""
+    return "KBANK" if "K Contact Center" in text or "ถอนเงิน / ฝากเงิน" in text else "KTB"
+
+
 def extract(pdf_path: str, password: str | None = None):
-    """Public helper: a statement PDF -> list of ledger-row dicts."""
+    """Public helper: a statement PDF (KTB or KBank) -> list of ledger-row dicts."""
+    if bank_of(pdf_path, password) == "KBANK":
+        return parse_kbank(pdf_path, password)
     return build_rows(parse(pdf_path, password))[0]
 
 
