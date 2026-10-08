@@ -1,0 +1,14 @@
+# Personal financial data - never commit
+workspace/*.csv
+web/src/data/
+Statement/
+
+# Secrets
+.env
+workspace/token.json
+workspace/credentials.json
+workspace/.gmail_seen.json
+
+# Local tooling
+.venv/
+__pycache__/
