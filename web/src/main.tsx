@@ -1,18 +1,26 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { StyledEngineProvider, ThemeProvider } from '@mui/material/styles'
+import { MotionConfig } from 'motion/react'
 import './index.css'
 import App from './App.tsx'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { theme } from '@/lib/mui-theme'
+import { initialTheme } from '@/lib/themes'
+
+const start = initialTheme()
+document.documentElement.dataset.theme = start.id   // before the first paint: no flash of the wrong theme
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* enableCssLayer: MUI styles go in @layer mui (ordered in index.css) so Tailwind classes override them */}
     <StyledEngineProvider enableCssLayer>
-      <ThemeProvider theme={theme} defaultMode="dark">
+      <ThemeProvider theme={theme} defaultMode={start.mode}>
         <TooltipProvider>
-          <App />
+          {/* "user": animations shrink to fades when the OS asks for reduced motion */}
+          <MotionConfig reducedMotion="user">
+            <App />
+          </MotionConfig>
         </TooltipProvider>
       </ThemeProvider>
     </StyledEngineProvider>

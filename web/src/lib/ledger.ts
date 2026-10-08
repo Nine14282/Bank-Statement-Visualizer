@@ -1,6 +1,9 @@
+import { bankName } from '@/lib/banks'
+import type { PlanItem } from '@/lib/plan'
 export type Tx = { date: string; desc: string; cat: string; amt: number; bal: number | null; bank: string; label?: string }
 export type Gaps = { months: string[]; breaks: { after: string; before: string; missing: number; bank?: string }[] }
-export type Meta = { account: string; name: string; from: string; to: string; n: number; gaps: Gaps }
+// theme / plan: picked in the setup wizard (THEME setting, workspace/expected.json); absent in older ledgers.
+export type Meta = { account: string; name: string; from: string; to: string; n: number; gaps: Gaps; theme?: string; plan?: PlanItem[] }
 
 // ledger.json is written by build_dashboard.py and git-ignored, so it is absent on a fresh clone:
 // the glob then matches nothing and the app shows its empty state instead of failing to build.
@@ -13,7 +16,16 @@ export const TX = DATA.tx
 export type Rule = { match: string; label: string; cat?: string }
 const RULES_KEY = 'ledger-label-rules'
 export const RULES: Rule[] = (() => { try { return JSON.parse(localStorage.getItem(RULES_KEY) ?? '[]') } catch { return [] } })()
-export const ruleFor = (desc: string) => RULES.find((r) => r.match && desc.toLowerCase().includes(r.match.toLowerCase()))
+// When several labels match one description the most specific wins (longest match text; newest on a tie), so a
+// narrow label ("คนละครึ่ง" for one wallet) is not hidden by a broad one ("True Money" for every wallet).
+export const ruleFor = (desc: string) => {
+  const d = desc.toLowerCase()
+  let best: Rule | undefined
+  for (const r of RULES) if (r.match && d.includes(r.match.toLowerCase()) && (!best || r.match.length >= best.match.length)) best = r
+  return best
+}
+// Rows a rule's text appears in, whether or not it is the one that wins there.
+export const rowsFor = (r: Rule) => TX.filter((t) => t.desc.toLowerCase().includes(r.match.toLowerCase()))
 for (const t of TX) {  // applied once at load, so every total, chart and search sees it
   const r = ruleFor(t.desc)
   if (r) { t.label = r.label; if (r.cat) t.cat = r.cat }
@@ -23,6 +35,13 @@ export function saveRules(rules: Rule[]) {
   localStorage.setItem(RULES_KEY, JSON.stringify(rules))
   location.reload()
 }
+// KTB marks a payment made after its nightly cut-off (~23:00) with "~ Future Amount: 65 ~ Tran: MORPSW": the
+// statement shows it posted ~01:30-02:30 the next day (unless a payment email supplied the real time, see
+// update_statement.py). descOf hides that bank code for display; matching still uses the full desc.
+const FUTURE = /\s*~?\s*Future\s+Amount:\s*[\d.,]*\s*~\s*Tran:\s*\S+\s*$/
+export const lateNight = (t: Tx) => FUTURE.test(t.desc)
+export const descOf = (t: Tx) => t.desc.replace(FUTURE, '')
+export const LATE_NOTE = 'Paid after the bank’s nightly cut-off (about 23:00). The statement posts it early the next morning; the time shown is the payment email’s when there is one.'
 // Default text to match on: the merchant/recipient part of a payment-email row, else the whole description.
 export const merchant = (desc: string) => desc.split(' (email) ')[1] ?? desc
 export const META = DATA.meta
@@ -30,8 +49,7 @@ export const YEARS = [...new Set(TX.map((r) => r.date.slice(0, 4)))].sort()
 export const FIRST = META.from.slice(0, 10)
 export const LAST = META.to.slice(0, 10)
 
-export const BANK_NAME: Record<string, string> = { KTB: 'Krungthai', KBANK: 'KBank', Manual: 'Manual entry' }
-export const bankName = (b: string) => BANK_NAME[b] ?? b
+export { bankName }
 // Money moved between your own accounts: left out of income, expenses and spend rate (it nets to zero).
 export const OWN = 'Own transfer'
 
@@ -67,6 +85,7 @@ export function summarize(rows: Tx[]) {
   const ecat = new Map<string, [number, number]>()
   const icat = new Map<string, [number, number]>()
   const csum = new Map<string, [number, number]>()
+  const banks = new Map<string, { bank: string; in: number; out: number; nIn: number }>()
   const bump = (m: Map<string, [number, number]>, k: string, v: number) => {
     const a = m.get(k) ?? [0, 0]
     a[0] += v
@@ -79,6 +98,9 @@ export function summarize(rows: Tx[]) {
     const m = months.get(mo) ?? { m: mo, inc: 0, exp: 0 }
     months.set(mo, m)
     bump(csum, r.cat, r.amt)
+    const b = banks.get(r.bank) ?? { bank: r.bank, in: 0, out: 0, nIn: 0 }
+    banks.set(r.bank, b)
+    if (r.amt >= 0) { b.in += r.amt; b.nIn++ } else b.out -= r.amt
     if (r.amt >= 0) { inc += r.amt; nIn++; m.inc += r.amt; bump(icat, r.cat, r.amt) }
     else { exp -= r.amt; nOut++; m.exp -= r.amt; bump(ecat, r.cat, -r.amt) }
   }
@@ -103,6 +125,8 @@ export function summarize(rows: Tx[]) {
     open: round2([...first.values()].reduce((a, v) => a + v, 0)),
     close: now.total,
     closeParts: now.parts,
+    // money in / out per bank, biggest source of income first
+    banks: [...banks.values()].map((b) => ({ ...b, in: round2(b.in), out: round2(b.out) })).sort((a, b) => b.in - a.in),
     months: [...months.values()].sort((a, b) => (a.m < b.m ? -1 : 1))
       .map((m) => ({ m: m.m, inc: round2(m.inc), exp: round2(m.exp), net: round2(m.inc - m.exp) })),
     ecat: catlist(ecat), icat: catlist(icat),
@@ -166,3 +190,66 @@ export function rateTable(from: string, to: string, cash: boolean) {
 
 export const pctOf = (o: number, i: number) => (i > 0 ? ((o / i) * 100).toFixed(0) + '%' : '—')
 export const idx = (r: number, usual: number | null) => (usual ? r / usual : null)
+
+/* ---------- dashboard widgets ---------- */
+// Money in / out per calendar day over the n days ending at the last record (own transfers left out).
+export function daily(n: number) {
+  const days = new Map<string, { d: string; in: number; out: number }>()
+  for (let i = n - 1; i >= 0; i--) { const d = addDays(LAST, -i); days.set(d, { d, in: 0, out: 0 }) }
+  for (const t of TX) {
+    const r = days.get(t.date.slice(0, 10))
+    if (!r || t.cat === OWN) continue
+    if (t.amt >= 0) r.in += t.amt
+    else r.out -= t.amt
+  }
+  return [...days.values()].map((r) => ({ ...r, in: round2(r.in), out: round2(r.out) }))
+}
+
+// Who you pay most often (or, with `inc`, who pays you). Key = your label, else the description's payee part
+// (account numbers repeat per payee), so it also works as a search term for the transaction table.
+export type Payee = { key: string; name: string; n: number; amt: number; last: Tx }
+export const payeeKey = (t: Tx) => t.label ?? merchant(t.desc)
+// `own`: keep own-account transfers too (the label editor must still list a payee the user filed as one).
+export function payees(rows: Tx[], n: number, inc = false, own = false) {
+  const m = new Map<string, Payee>()
+  for (const t of rows) {
+    if ((inc ? t.amt <= 0 : t.amt >= 0) || (t.cat === OWN && !own)) continue
+    const key = payeeKey(t)
+    const id = t.desc.match(/(\d{3,})\D*$/)?.[1]
+    const p = m.get(key) ?? { key, name: t.label ?? (key !== t.desc ? key : `${t.cat}${id ? ` ··${id.slice(-4)}` : ''}`), n: 0, amt: 0, last: t }
+    p.n++
+    p.amt = round2(p.amt + Math.abs(t.amt))
+    p.last = t
+    m.set(key, p)
+  }
+  return [...m.values()].sort((a, b) => b.n - a.n).slice(0, n)
+}
+
+// Spending in the month of the last record so far; `keys` = payees on the expected-spending list, whose share is
+// reported apart (the rest is unplanned).
+export function thisMonth(keys: Set<string>) {
+  const from = LAST.slice(0, 8) + '01', end = mEnd(LAST.slice(0, 7))
+  const days = +end.slice(8)
+  let planned = 0
+  for (const t of TX) if (t.amt < 0 && t.cat !== OWN && t.date.slice(0, 10) >= from && keys.has(payeeKey(t))) planned -= t.amt
+  return { from, end, days, spent: rateRow(from, LAST, false).spend, planned: round2(planned), elapsed: +LAST.slice(8) / days }
+}
+
+// "MR. SOMCHAI JAIDEE" -> "Somchai" for the greeting; blank when the settings carry no name.
+export const firstName = (() => {
+  const w = META.name.replace(/^(mr|mrs|ms|miss|นางสาว|นาย|นาง)\.?\s*/i, '').split(/\s+/)[0] ?? ''
+  return w && w[0].toUpperCase() + w.slice(1).toLowerCase()
+})()
+
+// Text that a spreadsheet would run as a formula (=, +, -, @, tab, CR first) gets a leading ' so it stays text.
+// Only for text columns: the Amount / Balance numbers we format ourselves and must stay numbers.
+export const csvText = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v)
+
+// Rows as a spreadsheet-friendly CSV (BOM so Excel reads the Thai text).
+export function toCsv(rows: Tx[]) {
+  const q = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)
+  const head = ['Date', 'Description', 'Label', 'Category', 'Amount', 'Balance', 'Bank']
+  const body = rows.map((t) => [t.date, csvText(t.desc), csvText(t.label ?? ''), csvText(t.cat), t.amt.toFixed(2),
+    t.bal == null ? '' : t.bal.toFixed(2), csvText(bankName(t.bank))].map(q).join(','))
+  return '﻿' + [head.join(','), ...body].join('\n')
+}

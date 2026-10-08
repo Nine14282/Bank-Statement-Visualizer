@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { FIRST, LAST, baht, idx, monthsBack, pctOf, rateTable, type RateRow } from '@/lib/ledger'
+import { InfoTip } from '@/components/ledger/info'
 import { cn } from '@/lib/utils'
 
 export function Index({ r, usual }: { r: number; usual: number | null }) {
@@ -34,13 +35,17 @@ export function SpendRate() {
   )
 
   return (
-    <Card id="spend-rate" data-od-id="spend-rate" className="scroll-mt-16">
+    <Card id="spend-rate" data-od-id="spend-rate" className="scroll-mt-20">
       <CardHeader>
-        <CardTitle>Spend rate by period</CardTitle>
+        <CardTitle className="flex items-center gap-1.5">Spend rate by period
+          <InfoTip>
+            ฿/day = spending ÷ calendar days{t?.clipped ? ` (counted up to the last record, ${LAST})` : ''}. "vs usual" = that ÷ your usual rate:
+            above 1× is faster than usual. Out ÷ in = all money out ÷ income.
+          </InfoTip>
+        </CardTitle>
         <CardDescription>
-          {t && (t.usual == null ? 'No data in this range. ' :
-            `Usual rate ${baht(t.usual)}/day = median of ${t.nPrior}${t.own ? ' month(s) in this range (no earlier data). ' : ' earlier month(s). '}`)}
-          {t && `Days are calendar days${t.clipped ? `, counted up to the last record (${LAST})` : ''}. Out ÷ in = all money out ÷ income.`}
+          {t && (t.usual == null ? 'No data in this range.'
+            : <>Your usual rate is <b className="num text-foreground">{baht(t.usual)}/day</b> (the median of {t.nPrior}{t.own ? ' months in this range' : ' earlier months'}).</>)}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -51,7 +56,7 @@ export function SpendRate() {
           <label className="flex items-center gap-2">To
             <Input type="date" className="w-40" min={FIRST} max={LAST} value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {PRESETS.map(([n, l]) => (
               <Button key={l} size="sm" variant="outline"
                 onClick={() => { setFrom(n ? monthsBack(n) : FIRST); setTo(LAST) }}>{l}</Button>

@@ -1,4 +1,5 @@
 import { useMemo, useState, useSyncExternalStore } from 'react'
+import Pagination from '@mui/material/Pagination'
 import { ArrowDown, ArrowUp, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -6,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { bankName, baht, signed, TX, type Tx } from '@/lib/ledger'
+import { LATE_NOTE, bankName, baht, descOf, lateNight, signed, TX, type Tx } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 import { TxDrawer } from '@/components/ledger/tx-drawer'
 
@@ -32,7 +33,9 @@ const FRESH = (() => {
 })()
 const fresh = (r: Tx) => FRESH.has(KEY.get(r)!)
 
-const ROW_CAP = 1500  // ponytail: plain slice, paginate if the ledger outgrows one screenful of scrolling
+// Rows per numbered page (fits one screen without an inner scroll). Drawing all 1500 rows at once was ~6500 DOM
+// nodes re-rendered on every keystroke / year switch.
+const PAGE = 15
 type Key = 'date' | 'desc' | 'cat' | 'amt' | 'bal'
 
 const CMP: Record<Key, (a: Tx, b: Tx) => number> = {
@@ -59,12 +62,19 @@ const useDesktop = () =>
     () => matchMedia(lg).matches,
   )
 
-export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
+// Search term lives in App so the payee card's "Show" can set it.
+export function TxTable({ rows, caption, term, onTerm }: { rows: Tx[]; caption: string; term: string; onTerm: (t: string) => void }) {
   const desktop = useDesktop()
   const [sel, setSel] = useState<Tx | null>(null)
-  const [term, setTerm] = useState('')
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all')
   const [sort, setSort] = useState<{ key: Key; dir: 1 | -1 }>({ key: 'date', dir: -1 })
+  const [page, setPage] = useState(1)
+  // back to one page whenever the list itself changes (adjusting state during render, no extra effect pass)
+  const [seen, setSeen] = useState({ rows, term, filter, sort })
+  if (seen.rows !== rows || seen.term !== term || seen.filter !== filter || seen.sort !== sort) {
+    setSeen({ rows, term, filter, sort })
+    setPage(1)
+  }
 
   const shown = useMemo(() => {
     const t = term.trim().toLowerCase()
@@ -87,8 +97,18 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
     </TableHead>
   )
 
+  const pages = Math.ceil(shown.length / PAGE)
+  const from = (page - 1) * PAGE
+  const view = shown.slice(from, from + PAGE)
+  // a new page starts at the top of the card, not wherever the pager was
+  const turn = (p: number) => {
+    setPage(p)
+    const top = document.getElementById('transactions')
+    if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
-    <Card id="transactions" data-od-id="transactions" className="scroll-mt-16">
+    <Card id="transactions" data-od-id="transactions" className="scroll-mt-20">
       <CardHeader className="pb-1">
         <CardTitle>All transactions</CardTitle>
         <CardDescription>{caption}</CardDescription>
@@ -99,7 +119,7 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input className="pl-9" placeholder="Search description, label, category, bank…" aria-label="Search transactions"
-                value={term} onChange={(e) => setTerm(e.target.value)} />
+                value={term} onChange={(e) => onTerm(e.target.value)} />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-start">
               <ToggleGroup variant="outline" value={[filter]} onValueChange={(v) => v[0] && setFilter(v[0] as typeof filter)} aria-label="Filter transactions">
@@ -124,9 +144,9 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
           </div>}
         </div>
 
-        {desktop ? <div className="max-h-[520px] overflow-auto rounded-lg border">
+        {desktop ? <div className="overflow-hidden rounded-lg border">
           <Table className="min-w-[660px]">
-            <TableHeader className="sticky top-0 z-10 bg-card">
+            <TableHeader className="bg-card">
               <TableRow>
                 {head('date', 'Date / time')}
                 {head('desc', 'Description')}
@@ -139,14 +159,15 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
               {shown.length === 0 && (
                 <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">No transactions match your search.</TableCell></TableRow>
               )}
-              {shown.slice(0, ROW_CAP).map((r) => (
+              {view.map((r) => (
                 <TableRow key={KEY.get(r)} tabIndex={0} className={cn('cursor-pointer', fresh(r) && 'tx-new')} onClick={() => setSel(r)}
                   onKeyDown={(e) => e.key === 'Enter' && setSel(r)}>
                   <TableCell className="num whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">
                     {r.date.slice(0, 10)}<small className="block">{r.date.slice(11)}</small>
                   </TableCell>
                   <TableCell className="max-w-56 whitespace-normal px-3 py-2 align-top">
-                    {r.label ? <><span className="font-medium">{r.label}</span><small className="block text-muted-foreground">{r.desc}</small></> : r.desc}
+                    {r.label ? <><span className="font-medium">{r.label}</span><small className="block text-muted-foreground">{descOf(r)}</small></> : descOf(r)}
+                    {lateNight(r) && <span title={LATE_NOTE} className="ml-1.5 inline-block rounded-full border px-1.5 text-xs text-muted-foreground align-middle">late-night</span>}
                   </TableCell>
                   <TableCell className="hidden px-3 py-2 align-top lg:table-cell">
                     <Badge variant="outline">{r.cat}</Badge><small className="mt-1 block text-muted-foreground">{bankName(r.bank)}</small>
@@ -155,19 +176,16 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
                   <TableCell className="num px-3 py-2 text-right align-top text-muted-foreground">{r.bal == null ? '—' : baht(r.bal)}</TableCell>
                 </TableRow>
               ))}
-              {shown.length > ROW_CAP && (
-                <TableRow><TableCell colSpan={5} className="py-6 text-center text-muted-foreground">Showing first {ROW_CAP} of {shown.length} — refine to see more.</TableCell></TableRow>
-              )}
             </TableBody>
           </Table>
-        </div> : <div className="max-h-[520px] overflow-y-auto rounded-lg border px-3">
+        </div> : <div className="rounded-lg border px-3">
           {shown.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">No transactions match your search.</p>}
-          {shown.slice(0, ROW_CAP).map((r) => (
+          {view.map((r) => (
             <article key={KEY.get(r)} tabIndex={0} onClick={() => setSel(r)} onKeyDown={(e) => e.key === 'Enter' && setSel(r)}
               className={cn(fresh(r) && 'tx-new', 'grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-b py-2.5 last:border-b-0')}>
               <div className="min-w-0">
-                <p className="break-words text-sm font-medium leading-snug">{r.label ?? r.desc}</p>
-                {r.label && <p className="break-words text-xs text-muted-foreground">{r.desc}</p>}
+                <p className="break-words text-sm font-medium leading-snug">{r.label ?? descOf(r)}{lateNight(r) && <span title={LATE_NOTE} className="ml-1.5 inline-block rounded-full border px-1.5 text-xs text-muted-foreground align-middle">late-night</span>}</p>
+                {r.label && <p className="break-words text-xs text-muted-foreground">{descOf(r)}</p>}
                 <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="num text-xs text-muted-foreground">{r.date.slice(0, 10)} · {r.date.slice(11)} · {bankName(r.bank)}</span>
                   <Badge variant="outline" className="max-w-40 truncate">{r.cat}</Badge>
@@ -179,10 +197,18 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
               </div>
             </article>
           ))}
-          {shown.length > ROW_CAP && (
-            <p className="py-4 text-center text-sm text-muted-foreground">Showing first {ROW_CAP} of {shown.length} — refine to see more.</p>
-          )}
         </div>}
+        {pages > 1 && (
+          <nav aria-label="Transaction pages" className="flex flex-col items-center gap-2 pt-1 sm:flex-row sm:justify-between">
+            <span className="num text-xs text-muted-foreground">{from + 1}–{from + view.length} of {shown.length}</span>
+            <Pagination count={pages} page={page} onChange={(_, p) => turn(p)} shape="rounded" size={desktop ? 'medium' : 'large'}
+              siblingCount={desktop ? 1 : 0} boundaryCount={1}
+              sx={{ '& .MuiPaginationItem-root': { color: 'var(--foreground)', borderColor: 'var(--border)', fontFamily: 'var(--font-mono)', borderRadius: '9999px' },
+                '& .MuiPaginationItem-root:hover': { bgcolor: 'var(--muted)' },
+                // !important: MUI injects PaginationItem's own selected style outside the css layer, so it beats a layered rule
+                '& .MuiPaginationItem-root.Mui-selected': { bgcolor: 'var(--brand) !important', color: '#fff !important', fontWeight: 600 } }} />
+          </nav>
+        )}
       </CardContent>
       <TxDrawer tx={sel} onClose={() => setSel(null)} />
     </Card>

@@ -1,64 +1,25 @@
 import { useMemo, useState } from 'react'
 import LinearProgress from '@mui/material/LinearProgress'
-import MuiTooltip from '@mui/material/Tooltip'
-import { useColorScheme } from '@mui/material/styles'
-import { ArrowRight, ArrowRightLeft, CircleAlert, CircleCheck, Hourglass, LayoutDashboard, ListOrdered, Moon, Sun, TrendingUp } from 'lucide-react'
-import { BalanceArea, MonthlyBars } from '@/components/ledger/charts'
+import { motion } from 'motion/react'
+import { ArrowRight } from 'lucide-react'
 import { CategoryCard } from '@/components/ledger/categories'
-import { Kpi, KpiGrid } from '@/components/ledger/kpi'
+import { CustomTab } from '@/components/ledger/custom'
+import { PlanTab } from '@/components/ledger/plan'
+import { InfoTip } from '@/components/ledger/info'
+import { Reveal } from '@/components/ledger/motion'
 import { Predict } from '@/components/ledger/predict'
+import { Nav, TopBar } from '@/components/ledger/shell'
+import { goTo, useActiveSection, type Tab } from '@/lib/nav'
+import { usePlan, type PlanItem } from '@/lib/plan'
+import { useTheme } from '@/lib/themes'
+import { Wizard } from '@/components/setup/wizard'
 import { Index, SpendRate } from '@/components/ledger/spend-rate'
 import { TxTable } from '@/components/ledger/tx-table'
+import { MoneyMovement, MonthSpend, Overview, Payees, RecentTx, Segmented, WalletStack } from '@/components/ledger/widgets'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
-  SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
-} from '@/components/ui/sidebar'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { LAST, META, TX, YEARS, bankName, baht, monthsBack, pctOf, rateTable, signed, summarize } from '@/lib/ledger'
-
-// sidebar items scroll to a section of the single page (no view switching)
-const goTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
-function useDark() {
-  const { mode, setMode } = useColorScheme()
-  const dark = mode !== 'light'
-  return [dark, () => setMode(dark ? 'light' : 'dark')] as const
-}
-
-function Flows({ s }: { s: ReturnType<typeof summarize> }) {
-  const cards = [
-    { h: 'Cash', f: s.cash, note: 'net converted to cash', out: 'Withdrawn to cash', in: 'Deposited from cash' },
-    { h: 'Lending', f: s.lend, note: 'net settled this period', out: 'Lent out', in: 'Repaid to you' },
-    { h: 'Investing (stocks)', f: s.stock, note: 'net placed into stocks', out: 'Invested', in: 'Returns received' },
-  ]
-  return (
-    <div className="divide-y lg:grid lg:grid-cols-3 lg:divide-x lg:divide-y-0 xl:block xl:divide-x-0 xl:divide-y">
-      {cards.map((c) => {
-        const net = c.f.in - c.f.out
-        return (
-          <div key={c.h} className="py-3 first:pt-0 last:pb-0 lg:px-4 lg:py-0 lg:first:pl-0 lg:last:pr-0 xl:px-0 xl:py-3 xl:first:pt-0 xl:last:pb-0">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <div className="text-sm font-semibold">{c.h}</div>
-              <div className={`display whitespace-nowrap text-2xl ${net >= 0 ? 'text-pos' : 'text-neg'}`}>{signed(net)}</div>
-            </div>
-            <div className="eyebrow mt-0.5 normal-case tracking-normal">{c.note}</div>
-            {[[c.out, c.f.out, c.f.nOut, 'var(--expense)'], [c.in, c.f.in, c.f.nIn, 'var(--income)']].map(([l, v, n, col]) => (
-              <div key={l as string} className="mt-2 flex items-center justify-between gap-3 text-sm">
-                <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
-                  <span className="size-2 shrink-0 rounded-full" style={{ background: col as string }} />
-                  <span className="truncate">{l as string}</span>
-                </span>
-                <span className="num shrink-0 font-semibold">{baht(v as number)}<small className="ml-1 font-normal text-muted-foreground">{n as number}×</small></span>
-              </div>
-            ))}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
+import { LAST, META, TX, YEARS, bankName, baht, daysBetween, firstName, monthsBack, pctOf, rateTable, summarize, type Tx } from '@/lib/ledger'
+import { EASE, cn } from '@/lib/utils'
 
 function Recent() {
   const { months, total, usual } = useMemo(() => rateTable(monthsBack(4), LAST, false), [])
@@ -78,9 +39,9 @@ function Recent() {
             <div className="text-xs text-muted-foreground">usual {usual == null ? '—' : baht(usual)}</div>
           </div>
           <div>
-            <MuiTooltip title="This period's average ฿/day divided by your usual ฿/day (median of earlier months). Above 1× = spending faster than usual." arrow>
-              <div className="eyebrow w-fit cursor-help underline decoration-dotted underline-offset-4">vs usual</div>
-            </MuiTooltip>
+            <div className="eyebrow flex items-center gap-1">vs usual
+              <InfoTip>This period's ฿/day ÷ your usual ฿/day (median of earlier months). Above 1× = spending faster than usual.</InfoTip>
+            </div>
             <div className="display mt-1 text-2xl"><Index r={total.rate} usual={usual} /></div>
             <div className="text-xs text-muted-foreground">daily rate ÷ usual rate</div>
           </div>
@@ -103,7 +64,7 @@ function Recent() {
               <LinearProgress variant="determinate" aria-label={`${r.k} daily spend rate`}
                 value={Math.min(100, (r.rate / Math.max(...months.map((m) => m.rate), 1)) * 100)}
                 sx={{ height: 4, borderRadius: 2, bgcolor: 'var(--muted)', gridColumn: '1 / -1', order: 3,
-                  '& .MuiLinearProgress-bar': { borderRadius: 2, bgcolor: (usual && r.rate / usual > 1.15) ? 'var(--expense)' : 'var(--income)' } }} />
+                  '& .MuiLinearProgress-bar': { borderRadius: 2, bgcolor: (usual && r.rate / usual > 1.15) ? 'var(--neg)' : 'var(--expense)' } }} />
               <span className="num col-span-2 whitespace-nowrap text-right text-xs sm:col-span-1" title="Daily rate · vs usual · out ÷ in">
                 {baht(r.rate)}/day · <Index r={r.rate} usual={usual} /> · {pctOf(r.out, r.inc)}
               </span>
@@ -122,7 +83,7 @@ function Coverage() {
   const g = META.gaps
   if (!g.months.length && !g.breaks.length) return null
   return (
-    <Card id="coverage" className="ring-neg">
+    <Card id="coverage" className="scroll-mt-20 ring-neg">
       <CardHeader>
         <CardTitle className="text-neg">Data may be missing</CardTitle>
         <CardDescription>A statement is probably missing — totals below won't include it</CardDescription>
@@ -143,179 +104,124 @@ function Coverage() {
   )
 }
 
-function Dashboard() {
+// How current the data is, so a stale statement is noticed before its numbers are trusted.
+const fresh = () => {
+  const d = daysBetween(LAST, new Date().toLocaleDateString('en-CA'))
+  return d <= 0 ? 'updated today' : `last record ${d} day${d === 1 ? '' : 's'} ago`
+}
+
+// Time-of-day greeting with the account holder's first name (from the settings), like a banking app home screen.
+const hello = () => {
+  const h = new Date().getHours()
+  const part = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  return firstName ? `${part}, ${firstName}!` : `${part}!`
+}
+
+// The tab sits in the URL hash, so the reload after saving a label (saveRules) lands back on the same tab.
+const hashTab = (): Tab => (location.hash === '#custom' ? 'custom' : location.hash === '#plan' ? 'plan' : 'dashboard')
+
+function Ledger({ theme }: { theme: ReturnType<typeof useTheme> }) {
+  const [tab, setTabState] = useState(hashTab)
   const [year, setYear] = useState('all')
-  const [dark, toggleDark] = useDark()
-
+  const [term, setTerm] = useState('')
+  const [plan, setPlan] = usePlan()
   const rows = useMemo(() => (year === 'all' ? TX : TX.filter((r) => r.date.startsWith(year))), [year])
-  const s = useMemo(() => summarize(rows), [rows])
-  const gaps = META.gaps.months.length + META.gaps.breaks.length
-  const range = s.n ? `${rows[0].date.slice(0, 10)} to ${rows[rows.length - 1].date.slice(0, 10)}` : 'no transactions'
-
+  const setTab = (t: Tab) => {
+    if (t === tab) return
+    location.replace(t === 'dashboard' ? '#' : `#${t}`)
+    setTabState(t)
+    scrollTo({ top: 0 })
+  }
 
   return (
-    <SidebarProvider>
-      <Sidebar data-od-id="sidebar">
-        <SidebarHeader className="gap-3 p-4">
-          <div className="flex items-center gap-3 font-serif text-lg leading-tight">
-            <span className="grid size-9 place-items-center rounded-xl bg-foreground text-lg text-background">฿</span>
-            Income &amp; Expense<br />Ledger
-          </div>
-          {(META.account || META.name) && (
-            <div className="num rounded-lg border bg-muted/40 p-2.5 text-[11.5px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-              {[META.account, META.name].filter(Boolean).join(' · ')}
-            </div>
-          )}
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>Views</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}><LayoutDashboard />Overview</SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={() => goTo('spend-rate')}><TrendingUp />Spend rate</SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={() => goTo('predict')}><Hourglass />Predict</SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton onClick={() => goTo('transactions')}><ListOrdered />Transactions</SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-        <SidebarFooter className="gap-2 p-4">
-          <a href="#coverage" data-od-id="coverage-status"
-            className={`flex items-start gap-2 rounded-lg border p-2.5 text-xs ${gaps ? 'border-neg text-neg' : 'text-pos'}`}>
-            {gaps ? <CircleAlert className="mt-0.5 size-4 shrink-0" /> : <CircleCheck className="mt-0.5 size-4 shrink-0" />}
-            {gaps ? `Data may be missing (${gaps} issue${gaps > 1 ? 's' : ''})` : 'Coverage OK — no gaps'}
-          </a>
-          <Button variant="outline" size="sm" onClick={toggleDark} aria-label="Toggle light or dark theme">
-            {dark ? <Sun /> : <Moon />}{dark ? 'Light' : 'Dark'} mode
-          </Button>
-        </SidebarFooter>
-      </Sidebar>
+    <div className="relative min-h-svh overflow-x-clip">
+      <div className="pointer-events-none absolute inset-x-0 top-16 h-[44rem] overflow-hidden" aria-hidden>
+        <span className="glow top-16 left-1/4 size-96 bg-brand" />
+        <span className="glow top-40 right-0 size-80 bg-expense [animation-delay:-7s]" />
+      </div>
+      <a href="#main" className="sr-only z-50 rounded-full bg-brand px-4 py-2 text-sm text-white focus:not-sr-only focus:fixed focus:top-3 focus:left-3">Skip to content</a>
+      <TopBar rows={rows} year={year} tab={tab} onTab={setTab} theme={theme} />
+      <main id="main" tabIndex={-1} className="relative mx-auto w-full max-w-[90rem] space-y-10 px-4 pb-28 sm:px-6 md:pb-14 md:pl-24 lg:pr-8">
+        {tab === 'dashboard' ? <Dashboard rows={rows} year={year} setYear={setYear} term={term} setTerm={setTerm} plan={plan} onPlan={() => setTab('plan')} />
+          : tab === 'plan' ? <PlanTab plan={plan} onPlan={setPlan} />
+          : <CustomTab />}
+        <p className="num pt-2 text-center text-xs text-muted-foreground">
+          Built from Statement/ · {META.n} transactions · figures in Thai Baht (฿)
+        </p>
+      </main>
+    </div>
+  )
+}
 
-      <SidebarInset className="min-w-0">
-        <header className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 pt-5 pb-3 sm:px-6 sm:pt-6 lg:px-8" data-od-id="topbar">
-          <SidebarTrigger className="md:hidden" />
-          <div className="min-w-0">
-            <p className="eyebrow">Statement period</p>
-            <h1 className="display text-3xl sm:text-4xl">{META.from.slice(0, 10)} → {META.to.slice(0, 10)}</h1>
-          </div>
-        </header>
+function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
+  rows: Tx[]; year: string; setYear: (y: string) => void; term: string; setTerm: (t: string) => void; plan: PlanItem[]; onPlan: () => void
+}) {
+  const active = useActiveSection()
+  const s = useMemo(() => summarize(rows), [rows])
+  const range = s.n ? `${rows[0].date.slice(0, 10)} to ${rows[rows.length - 1].date.slice(0, 10)}` : 'no transactions'
+  const fill = '[&>*]:h-full'
 
-        <main className="mx-auto w-full max-w-7xl space-y-5 px-4 pb-14 sm:space-y-7 sm:px-6 lg:px-8">
-          <>
-              <div data-od-id="scope-filter"
-                className="sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-y bg-background/95 px-4 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-                <span className="eyebrow">Year</span>
-                <ToggleGroup className="max-w-full flex-wrap" variant="outline" value={[year]} onValueChange={(v) => v[0] && setYear(v[0])} aria-label="Filter by year">
-                  <ToggleGroupItem value="all">All years</ToggleGroupItem>
-                  {YEARS.map((y) => <ToggleGroupItem key={y} value={y}>{y}</ToggleGroupItem>)}
-                </ToggleGroup>
-                <span className="num text-xs text-muted-foreground">
-                  {year === 'all' ? `All ${YEARS.length} years` : year} · {s.n} transactions · {s.months.length} months
-                </span>
-              </div>
+  return (
+    <>
+      <Nav active={active} />
+      <Nav active={active} mobile />
+      <section id="overview" className="scroll-mt-20 space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 pt-4">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: EASE }}>
+            <h1 className="text-3xl font-normal tracking-tight sm:text-4xl">{hello()}</h1>
+            <p className="num mt-1 text-xs text-muted-foreground">
+              {META.from.slice(0, 10)} → {META.to.slice(0, 10)} · showing {s.n} transactions over {s.months.length} months · {fresh()}
+            </p>
+          </motion.div>
+          <motion.div data-od-id="scope-filter" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.08, ease: EASE }}>
+            <Segmented id="year" big label="Filter by year" value={year} onChange={setYear}
+              options={[{ value: 'all', label: 'All years' }, ...YEARS.map((y) => ({ value: y, label: y }))]} />
+          </motion.div>
+        </div>
 
-              <Coverage />
+        <Coverage />
 
-              <div className="grid items-start gap-4 xl:grid-cols-[1.2fr_0.9fr]">
-                <div className="grid min-w-0 gap-4">
-                  <Card data-od-id="kpis">
-                    <CardHeader className="pb-0">
-                      <CardTitle>Account summary</CardTitle>
-                      <CardDescription>Income and expenses reconcile to the closing balance.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <KpiGrid className="grid-cols-1 gap-x-8 gap-y-4 overflow-visible rounded-none border-0 bg-transparent sm:grid-cols-2 lg:grid-cols-2">
-                        <Kpi label="Net change" value={signed(s.net)} sub="income − expenses"
-                          dot={s.net >= 0 ? 'var(--pos)' : 'var(--neg)'}
-                          valueClass={`text-4xl sm:text-5xl ${s.net >= 0 ? 'text-pos' : 'text-neg'}`}
-                          className="space-y-1.5 bg-transparent p-0 md:p-0" />
-                        <Kpi label="Closing balance" value={baht(s.close)} sub={s.closeParts.length > 1 || s.closeParts.some((p) => p.est) ? s.closeParts.map((p) => `${bankName(p.bank)} ${baht(p.bal)}${p.est ? ' (incl. payment emails)' : ''}`).join(' · ') : undefined}
-                          className="space-y-1.5 bg-transparent p-0 md:p-0" valueClass="text-4xl sm:text-5xl" />
-                      </KpiGrid>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-3">
-                        <div>
-                          <div className="eyebrow">Opening balance</div>
-                          <div className="num mt-1 text-sm font-medium">{baht(s.open)}</div>
-                        </div>
-                        <div>
-                          <div className="eyebrow flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: 'var(--income)' }} />Income · {s.nIn} deposits</div>
-                          <div className="num mt-1 text-sm font-medium">{baht(s.inc)}</div>
-                        </div>
-                        <div>
-                          <div className="eyebrow flex items-center gap-1.5"><span className="size-1.5 rounded-full" style={{ background: 'var(--expense)' }} />Expenses · {s.nOut} payments</div>
-                          <div className="num mt-1 text-sm font-medium">{baht(s.exp)}</div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card data-od-id="money-flows">
-                    <CardHeader className="pb-1">
-                      <CardTitle className="flex items-center gap-2"><ArrowRightLeft className="size-4" />Personal money flows</CardTitle>
-                      <CardDescription>Cash, lending and investing are tracked apart from spending.</CardDescription>
-                    </CardHeader>
-                    <CardContent><Flows s={s} /></CardContent>
-                  </Card>
-                </div>
-                <Recent />
-              </div>
+        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,27rem)_minmax(0,1fr)] lg:min-h-[34rem]">
+          <Reveal now className={fill}><WalletStack s={s} /></Reveal>
+          <Reveal now className={cn(fill, 'min-w-0')} delay={0.08}><Overview s={s} /></Reveal>
+        </div>
+        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <Reveal className={fill} delay={0.12}><MonthSpend plan={plan} onPlan={onPlan} /></Reveal>
+          <Reveal className={fill} delay={0.18}><Payees rows={rows} onShow={setTerm} /></Reveal>
+        </div>
+        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <Reveal className={fill}><RecentTx rows={rows} /></Reveal>
+          <Reveal className={fill} delay={0.08}><MoneyMovement /></Reveal>
+        </div>
+      </section>
 
-              <section className="space-y-3 pt-1">
-                <h2 className="display text-2xl sm:text-3xl">Monthly activity and balance</h2>
-                <div className="grid min-w-0 gap-4 xl:grid-cols-[1.2fr_1fr]">
-                  <Card className="min-w-0" data-od-id="chart-monthly">
-                    <CardHeader className="pb-0"><CardTitle>Monthly income vs. expense</CardTitle><CardDescription>Baht per calendar month</CardDescription></CardHeader>
-                    <CardContent className="pt-2"><MonthlyBars months={s.months} /></CardContent>
-                  </Card>
-                  <Card className="min-w-0" data-od-id="chart-balance">
-                    <CardHeader className="pb-0"><CardTitle>Account balance over time</CardTitle><CardDescription>Closing balance after every transaction</CardDescription></CardHeader>
-                    <CardContent className="pt-2"><BalanceArea balance={s.balance} /></CardContent>
-                  </Card>
-                </div>
-              </section>
+      <section id="categories" className="scroll-mt-20 space-y-4">
+        <h2 className="text-2xl tracking-tight sm:text-3xl">Categories</h2>
+        <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-2 xl:grid-cols-3" data-od-id="category-lists">
+          <Reveal className={fill}><CategoryCard title="Where money went" caption="Expenses by category" list={s.ecat} color="var(--expense)" /></Reveal>
+          <Reveal className={fill} delay={0.06}><CategoryCard title="Where money came from" caption="Income by category" list={s.icat} color="var(--income)" /></Reveal>
+          <Reveal className={fill} delay={0.12}><Recent /></Reveal>
+        </div>
+      </section>
 
-              <section className="space-y-3 pt-1">
-                <h2 className="display text-2xl sm:text-3xl">Categories</h2>
-                <div className="grid min-w-0 gap-4 xl:grid-cols-2" data-od-id="category-lists">
-                  <CategoryCard title="Where money went" caption="Expenses by category" list={s.ecat} color="var(--expense)" />
-                  <CategoryCard title="Where money came from" caption="Income by category" list={s.icat} color="var(--income)" />
-                </div>
-              </section>
-
-              <SpendRate />
-
-              <Predict />
-
-              <TxTable rows={rows} caption={`${s.n} transactions · ${range}`} />
-          </>
-          <p className="num pt-4 text-center text-xs text-muted-foreground">
-            Built from Statement/ · {META.n} transactions · figures in Thai Baht (฿)
-          </p>
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+      <Reveal><SpendRate /></Reveal>
+      <Reveal><Predict /></Reveal>
+      <Reveal><TxTable rows={rows} caption={`${s.n} transactions · ${range}`} term={term} onTerm={setTerm} /></Reveal>
+    </>
   )
 }
 
 function EmptyState() {
   const steps: [string, React.ReactNode][] = [
-    ['Add statements', <>Put your statement PDFs in <code className="num">Statement/</code>, or set up Gmail (see the README).</>],
-    ['Build', <>Run <code className="num">./run.sh</code> to build from the PDFs, or <code className="num">./gmail.sh</code> to fetch them from Gmail first.</>],
+    ['Run setup', <>Run <code className="num">./run.sh</code>: a setup page opens in your browser and walks you through adding your statement PDFs.</>],
+    ['Or by hand', <>Put the PDFs in <code className="num">Statement/</code> and run <code className="num">./run.sh</code>, or <code className="num">./gmail.sh</code> to fetch them from Gmail (see the README).</>],
     ['Reload this page', 'Your income, expenses, balance and spend rate appear here.'],
   ]
   return (
     <main className="grid min-h-svh place-items-center px-6 py-16" data-od-id="empty-state">
       <div className="w-full max-w-lg space-y-8">
         <div className="space-y-3">
-          <p className="eyebrow">Income &amp; Expense Ledger</p>
+          <p className="eyebrow">Statement Visualizer</p>
           <h1 className="display text-4xl sm:text-5xl">No data yet</h1>
           <p className="text-sm text-muted-foreground">Nothing has been imported, so there is nothing to show. Three steps:</p>
         </div>
@@ -335,6 +241,11 @@ function EmptyState() {
   )
 }
 
+// ./run.sh's setup server opens this page at /?setup: show the setup wizard instead of the dashboard.
+const SETUP = new URLSearchParams(location.search).has('setup')
+
 export default function App() {
-  return TX.length ? <Dashboard /> : <EmptyState />
+  const theme = useTheme()
+  if (SETUP) return <Wizard theme={theme} />
+  return TX.length ? <Ledger theme={theme} /> : <EmptyState />
 }

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { FIRST, LAST, TX, addDays, balanceNow, bankName, baht, daysBetween, rateRow } from '@/lib/ledger'
+import { InfoTip } from '@/components/ledger/info'
 import { cn } from '@/lib/utils'
 
 // Current money = every account's last printed balance + later rows that carry none (payment-notice emails).
@@ -42,19 +43,20 @@ export function Predict() {
   const main = left(rate)
 
   return (
-    <Card id="predict" data-od-id="predict" className="scroll-mt-16">
+    <Card id="predict" data-od-id="predict" className="scroll-mt-20">
       <CardHeader>
-        <CardTitle>How long will my money last?</CardTitle>
-        <CardDescription>
-          Current money ÷ spending rate, assuming the rate stays flat. Today is {today}; the newest record is {LAST}
-          {stale > 0 ? ` (${stale} day${stale === 1 ? '' : 's'} ago, assumed spent at the same rate)` : ''}. Money: {NOW.parts.map((p) => `${bankName(p.bank)} ${baht(p.bal)} (statement to ${p.at}${p.est ? ' + payment emails' : ''})`).join(' · ')}.
-          Transfers between your own accounts don't count as spending. A rough guide, not a forecast.
-        </CardDescription>
+        <CardTitle className="flex items-center gap-1.5">How long will my money last?
+          <InfoTip>
+            Current money ÷ spending per day, assuming the rate stays flat. Money: {NOW.parts.map((p) => `${bankName(p.bank)} ${baht(p.bal)} (statement to ${p.at}${p.est ? ' + payment emails' : ''})`).join(' · ')}.
+            {stale > 0 ? ` The newest record is ${stale} day${stale === 1 ? '' : 's'} old; those days are assumed spent at the same rate.` : ''} Transfers between your own accounts don't count.
+          </InfoTip>
+        </CardTitle>
+        <CardDescription>A rough guide, not a forecast · today {today}, newest record {LAST}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
           <span>Rate from the last</span>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {WINDOWS.map(([n, l]) => (
               <Button key={l} size="sm" variant={days === n ? 'default' : 'outline'} onClick={() => setDays(n)}>{l}</Button>
             ))}

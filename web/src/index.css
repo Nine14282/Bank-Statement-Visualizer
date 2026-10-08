@@ -9,9 +9,9 @@
     font-display: swap;
 }
 @font-face {
-    font-family: "Source Serif 4";
-    src: url("../node_modules/@fontsource/source-serif-4/files/source-serif-4-latin-400-normal.woff2") format("woff2");
-    font-weight: 400;
+    font-family: "Outfit";
+    src: url("../node_modules/@fontsource-variable/outfit/files/outfit-latin-wght-normal.woff2") format("woff2");
+    font-weight: 100 900;
     font-display: swap;
 }
 @font-face {
@@ -24,8 +24,8 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: var(--font-serif);
-    --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --font-heading: var(--font-display);
+    --font-display: 'Outfit', 'Geist', sans-serif;
     --font-sans: 'Geist', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
@@ -67,9 +67,9 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
+:root, .light {
+    --background: oklch(0.962 0.006 285);
+    --foreground: oklch(0.17 0.01 285);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
@@ -78,20 +78,20 @@
     --primary-foreground: oklch(0.985 0 0);
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted: oklch(0.95 0.006 285);
+    --muted-foreground: oklch(0.52 0.012 285);
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
+    --border: oklch(0.91 0.006 285);
+    --input: oklch(0.9 0.006 285);
     --ring: oklch(0.708 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
+    --radius: 0.75rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -103,7 +103,7 @@
 }
 
 .dark {
-    --background: oklch(0.155 0.006 320);
+    --background: oklch(0.14 0.006 320);
     --foreground: oklch(0.94 0.004 320);
     --card: oklch(0.185 0.007 320);
     --card-foreground: oklch(0.94 0.004 320);
@@ -143,24 +143,33 @@
   body {
     @apply bg-background text-foreground;
     }
+  /* Tailwind v4 resets buttons to the default cursor; every clickable thing here should show the hand. */
+  button:not(:disabled), [role="button"], [role="tab"], [role="radio"] { cursor: pointer; }
+  /* One visible keyboard focus ring for every custom control. */
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   html {
     @apply font-sans;
     }
 }
-/* ledger semantic colours: income violet / expense coral; signed amounts green / red */
-:root {
+/* ledger semantic colours: income violet / expense coral (data only); signed amounts green / red.
+   --brand is the interactive accent (selected pills, buttons, nav): same violet family, but its own token so
+   "violet" on a control never reads as "income", and dark enough for white text (>= 4.5:1) in both themes. */
+:root, .light {
+    --brand: oklch(0.5 0.24 295);
     --income: oklch(0.5 0.24 295);
     --expense: oklch(0.65 0.19 40);
     --pos: oklch(0.46 0.14 150);
     --neg: oklch(0.55 0.2 27);
 }
 .dark {
+    --brand: oklch(0.5 0.22 295);
     --income: oklch(0.64 0.24 295);
     --expense: oklch(0.73 0.17 40);
     --pos: oklch(0.76 0.16 155);
     --neg: oklch(0.72 0.16 25);
 }
 @theme inline {
+    --color-brand: var(--brand);
     --color-income: var(--income);
     --color-expense: var(--expense);
     --color-pos: var(--pos);
@@ -170,15 +179,16 @@
 body { font-family: var(--font-sans), "Noto Sans Thai", "Sarabun", system-ui, sans-serif; }
 .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-/* ---- data / stats / proof styling: serif display figures, mono caps labels, hairline cells ---- */
-.display { font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.03em;
+/* ---- data / stats styling: geometric display figures, mono caps labels ---- */
+.display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.025em;
            font-variant-numeric: lining-nums tabular-nums; }
-.eyebrow { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase;
+.eyebrow { font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-transform: uppercase;
            letter-spacing: 0.1em; color: var(--muted-foreground); }
 .pill { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
         padding: 2px 8px; border: 1px solid color-mix(in oklab, var(--income) 70%, transparent);
         border-radius: 6px; color: var(--foreground); }
-[data-slot="card-title"] { font-size: 1.375rem; font-weight: 400; letter-spacing: -0.02em; }
+[data-slot="card-title"] { font-size: 1.125rem; font-weight: 450; letter-spacing: -0.015em; }
+h1, h2 { font-family: var(--font-display); }
 
 /* New transaction rows (tx-table.tsx): slide in and fade a violet highlight. */
 @keyframes tx-new {
@@ -188,3 +198,28 @@ body { font-family: var(--font-sans), "Noto Sans Thai", "Sarabun", system-ui, sa
 }
 .tx-new { animation: tx-new 3s ease-out; }
 @media (prefers-reduced-motion: reduce) { .tx-new { animation: none; } }
+
+/* Ambient glow behind the greeting (App.tsx): two still, blurred blobs in the accent colours. */
+.glow { position: absolute; border-radius: 9999px; filter: blur(80px); opacity: 0.22; pointer-events: none; }
+.dark .glow { opacity: 0.16; }
+/* Segmented progress (widgets.tsx): ticks fill one after another. */
+@keyframes tick-in { from { transform: scaleY(0.3); opacity: 0; } }
+.tick { animation: tick-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@media (prefers-reduced-motion: reduce) { .tick { animation: none; } }
+
+/* Setup welcome (components/setup/wizard.tsx Hero): the theme's own background with slowly drifting glows in the
+   brand violet (and a little of the expense coral, as on the dashboard). Text uses the theme's foreground tokens,
+   so contrast is the theme's; the moving layer is transform-only. */
+.hero { background: var(--background); }
+.hero-glow { position: absolute; inset: -20%; pointer-events: none;
+    background:
+      radial-gradient(34% 40% at 30% 30%, color-mix(in oklab, var(--brand) 45%, transparent), transparent 70%),
+      radial-gradient(30% 36% at 74% 70%, color-mix(in oklab, var(--brand) 30%, transparent), transparent 70%),
+      radial-gradient(22% 26% at 80% 22%, color-mix(in oklab, var(--expense) 18%, transparent), transparent 70%);
+    filter: blur(40px); opacity: 0.9; animation: hero-drift 18s ease-in-out infinite alternate; }
+.light .hero-glow, :root:not(.dark) .hero-glow { opacity: 0.55; }
+@keyframes hero-drift {
+  from { transform: translate3d(-3%, -2%, 0) scale(1); }
+  to   { transform: translate3d(3%, 3%, 0) scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) { .hero-glow { animation: none; } }
