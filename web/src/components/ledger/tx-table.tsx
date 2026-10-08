@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { baht, signed, TX, type Tx } from '@/lib/ledger'
+import { bankName, baht, signed, TX, type Tx } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 import { TxDrawer } from '@/components/ledger/tx-drawer'
 
@@ -70,7 +70,7 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
     const t = term.trim().toLowerCase()
     const r = rows.filter((x) =>
       (filter === 'all' || (filter === 'in' ? x.amt >= 0 : x.amt < 0)) &&
-      (!t || x.desc.toLowerCase().includes(t) || x.cat.toLowerCase().includes(t) || !!x.label?.toLowerCase().includes(t)))
+      (!t || x.desc.toLowerCase().includes(t) || x.cat.toLowerCase().includes(t) || !!x.label?.toLowerCase().includes(t) || bankName(x.bank).toLowerCase().includes(t)))
     return r.sort((a, b) => CMP[sort.key](a, b) * sort.dir)  // stable: ties keep ledger order
   }, [rows, term, filter, sort])
 
@@ -98,7 +98,7 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="relative min-w-0 flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="pl-9" placeholder="Search description, label, category…" aria-label="Search transactions"
+              <Input className="pl-9" placeholder="Search description, label, category, bank…" aria-label="Search transactions"
                 value={term} onChange={(e) => setTerm(e.target.value)} />
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-start">
@@ -148,7 +148,9 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
                   <TableCell className="max-w-56 whitespace-normal px-3 py-2 align-top">
                     {r.label ? <><span className="font-medium">{r.label}</span><small className="block text-muted-foreground">{r.desc}</small></> : r.desc}
                   </TableCell>
-                  <TableCell className="hidden px-3 py-2 align-top lg:table-cell"><Badge variant="outline">{r.cat}</Badge></TableCell>
+                  <TableCell className="hidden px-3 py-2 align-top lg:table-cell">
+                    <Badge variant="outline">{r.cat}</Badge><small className="mt-1 block text-muted-foreground">{bankName(r.bank)}</small>
+                  </TableCell>
                   <TableCell className={cn('num px-3 py-2 text-right align-top font-semibold', r.amt >= 0 ? 'text-pos' : 'text-neg')}>{signed(r.amt)}</TableCell>
                   <TableCell className="num px-3 py-2 text-right align-top text-muted-foreground">{r.bal == null ? '—' : baht(r.bal)}</TableCell>
                 </TableRow>
@@ -167,7 +169,7 @@ export function TxTable({ rows, caption }: { rows: Tx[]; caption: string }) {
                 <p className="break-words text-sm font-medium leading-snug">{r.label ?? r.desc}</p>
                 {r.label && <p className="break-words text-xs text-muted-foreground">{r.desc}</p>}
                 <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="num text-xs text-muted-foreground">{r.date.slice(0, 10)} · {r.date.slice(11)}</span>
+                  <span className="num text-xs text-muted-foreground">{r.date.slice(0, 10)} · {r.date.slice(11)} · {bankName(r.bank)}</span>
                   <Badge variant="outline" className="max-w-40 truncate">{r.cat}</Badge>
                 </div>
               </div>

@@ -6,7 +6,7 @@ import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Typography from '@mui/material/Typography'
-import { RULES, TX, baht, merchant, ruleFor, saveRules, signed, type Tx } from '@/lib/ledger'
+import { RULES, TX, bankName, baht, merchant, ruleFor, saveRules, signed, type Tx } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -77,6 +77,7 @@ export function TxDrawer({ tx, onClose }: { tx: Tx | null; onClose: () => void }
             </div>
 
             <Divider sx={{ my: 3, borderColor: 'var(--border)' }} />
+            <Row label="Account">{bankName(tx.bank)}</Row>
             <Row label="Type">{tx.amt >= 0 ? 'Money in' : 'Money out'}</Row>
             <Row label="Balance after">{tx.bal == null ? '— (manual entry)' : baht(tx.bal)}</Row>
             <Divider sx={{ borderColor: 'var(--border)' }} />

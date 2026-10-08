@@ -1,5 +1,5 @@
-export type Tx = { date: string; desc: string; cat: string; amt: number; bal: number | null; label?: string }
-export type Gaps = { months: string[]; breaks: { after: string; before: string; missing: number }[] }
+export type Tx = { date: string; desc: string; cat: string; amt: number; bal: number | null; bank: string; label?: string }
+export type Gaps = { months: string[]; breaks: { after: string; before: string; missing: number; bank?: string }[] }
 export type Meta = { account: string; name: string; from: string; to: string; n: number; gaps: Gaps }
 
 // ledger.json is written by build_dashboard.py and git-ignored, so it is absent on a fresh clone:
@@ -30,6 +30,25 @@ export const YEARS = [...new Set(TX.map((r) => r.date.slice(0, 4)))].sort()
 export const FIRST = META.from.slice(0, 10)
 export const LAST = META.to.slice(0, 10)
 
+export const BANK_NAME: Record<string, string> = { KTB: 'Krungthai', KBANK: 'KBank', Manual: 'Manual entry' }
+export const bankName = (b: string) => BANK_NAME[b] ?? b
+// Money moved between your own accounts: left out of income, expenses and spend rate (it nets to zero).
+export const OWN = 'Own transfer'
+
+// Money in each account after `rows`: per bank, the last printed balance plus later rows that carry none
+// (payment-notice emails). Manual entries are cash, not in any account.
+export function balanceNow(rows: Tx[]) {
+  const last = new Map<string, { bank: string; bal: number; at: string; est: boolean }>()
+  for (const r of rows) {
+    if (r.bank === 'Manual') continue
+    const b = last.get(r.bank)
+    if (r.bal != null) last.set(r.bank, { bank: r.bank, bal: r.bal, at: r.date.slice(0, 10), est: false })
+    else if (b) { b.bal += r.amt; b.est = true }
+  }
+  const parts = [...last.values()].map((p) => ({ ...p, bal: round2(p.bal) }))
+  return { total: round2(parts.reduce((a, p) => a + p.bal, 0)), parts }
+}
+
 export const round2 = (n: number) => Math.round(n * 100) / 100
 export const baht = (n: number) =>
   '฿' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -55,6 +74,7 @@ export function summarize(rows: Tx[]) {
     m.set(k, a)
   }
   for (const r of rows) {
+    if (r.cat === OWN) continue
     const mo = r.date.slice(0, 7)
     const m = months.get(mo) ?? { m: mo, inc: 0, exp: 0 }
     months.set(mo, m)
@@ -68,21 +88,28 @@ export function summarize(rows: Tx[]) {
     const a = csum.get(o) ?? [0, 0], b = csum.get(i) ?? [0, 0]
     return { out: round2(-a[0]), nOut: a[1], in: round2(b[0]), nIn: b[1] }
   }
-  const known = rows.filter((r) => r.bal != null)  // manual rows carry no balance
-  const k0 = known[0], kN = known[known.length - 1], last = rows[rows.length - 1]
+  // Opening = each account's balance before its first row; balance series = sum of every account's latest balance.
+  const first = new Map<string, number>(), latest = new Map<string, number>()
+  const balance: { t: number; date: string; b: number }[] = []
+  for (const r of rows) {
+    if (r.bal == null) continue   // manual / payment-email rows carry no balance
+    if (!first.has(r.bank)) first.set(r.bank, r.bal - r.amt)
+    latest.set(r.bank, r.bal)
+    balance.push({ t: new Date(r.date.replace(' ', 'T')).getTime(), date: r.date, b: round2([...latest.values()].reduce((a, v) => a + v, 0)) })
+  }
+  const now = balanceNow(rows)
   return {
     n: rows.length, inc: round2(inc), exp: round2(exp), net: round2(inc - exp), nIn, nOut,
-    open: k0 ? round2(k0.bal! - k0.amt) : 0,
-    // last printed balance + later rows with no balance (payment-notice emails), so it matches "Current money"
-    close: kN ? round2(kN.bal! + rows.slice(rows.indexOf(kN) + 1).reduce((a, r) => a + r.amt, 0)) : 0,
-    closeAt: kN && kN !== last ? kN.date.slice(0, 10) : '',
+    open: round2([...first.values()].reduce((a, v) => a + v, 0)),
+    close: now.total,
+    closeParts: now.parts,
     months: [...months.values()].sort((a, b) => (a.m < b.m ? -1 : 1))
       .map((m) => ({ m: m.m, inc: round2(m.inc), exp: round2(m.exp), net: round2(m.inc - m.exp) })),
     ecat: catlist(ecat), icat: catlist(icat),
     cash: flow('Cash withdrawal', 'Cash deposit'),
     lend: flow('Lent out', 'Loan repaid to me'),
     stock: flow('Stock investment', 'Stock return'),
-    balance: known.map((r) => ({ t: new Date(r.date.replace(' ', 'T')).getTime(), date: r.date, b: r.bal! })),
+    balance,
   }
 }
 export type Summary = ReturnType<typeof summarize>
@@ -110,7 +137,7 @@ export function rateRow(a: string, b: string, cash: boolean): RateRow {
   let spend = 0, inc = 0, out = 0
   for (const t of TX) {
     const d = t.date.slice(0, 10)
-    if (d < a || d > b) continue
+    if (d < a || d > b || t.cat === OWN) continue
     if (t.amt > 0) inc += t.amt
     else { out -= t.amt; if (cash || !NOT_SPEND.has(t.cat)) spend -= t.amt }
   }

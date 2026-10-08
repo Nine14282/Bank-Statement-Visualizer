@@ -16,7 +16,7 @@ import {
   SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { LAST, META, TX, YEARS, baht, monthsBack, pctOf, rateTable, signed, summarize } from '@/lib/ledger'
+import { LAST, META, TX, YEARS, bankName, baht, monthsBack, pctOf, rateTable, signed, summarize } from '@/lib/ledger'
 
 // sidebar items scroll to a section of the single page (no view switching)
 const goTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -132,7 +132,7 @@ function Coverage() {
           {g.months.length > 0 && <li><b>No records at all:</b> {g.months.join(', ')}</li>}
           {g.breaks.map((b) => (
             <li key={b.after + b.before}>
-              <b>{b.after.slice(0, 10)} → {b.before.slice(0, 10)}:</b> balance moved{' '}
+              <b>{b.bank && `${bankName(b.bank)} `}{b.after.slice(0, 10)} → {b.before.slice(0, 10)}:</b> balance moved{' '}
               <span className="num">{b.missing > 0 ? '+' : '−'}{baht(b.missing)}</span> with no matching transactions
               ({b.missing > 0 ? 'money in' : 'money out'} not in the ledger)
             </li>
@@ -238,7 +238,7 @@ function Dashboard() {
                           dot={s.net >= 0 ? 'var(--pos)' : 'var(--neg)'}
                           valueClass={`text-4xl sm:text-5xl ${s.net >= 0 ? 'text-pos' : 'text-neg'}`}
                           className="space-y-1.5 bg-transparent p-0 md:p-0" />
-                        <Kpi label="Closing balance" value={baht(s.close)} sub={s.closeAt ? `bank balance ${s.closeAt} + later payment emails` : undefined}
+                        <Kpi label="Closing balance" value={baht(s.close)} sub={s.closeParts.length > 1 || s.closeParts.some((p) => p.est) ? s.closeParts.map((p) => `${bankName(p.bank)} ${baht(p.bal)}${p.est ? ' (incl. payment emails)' : ''}`).join(' · ') : undefined}
                           className="space-y-1.5 bg-transparent p-0 md:p-0" valueClass="text-4xl sm:text-5xl" />
                       </KpiGrid>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-3">

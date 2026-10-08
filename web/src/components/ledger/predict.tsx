@@ -2,15 +2,13 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { FIRST, LAST, TX, addDays, baht, daysBetween, rateRow } from '@/lib/ledger'
+import { FIRST, LAST, TX, addDays, balanceNow, bankName, baht, daysBetween, rateRow } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 
-// Current money = the last balance the bank printed + any later rows that carry no balance (payment-notice rows).
+// Current money = every account's last printed balance + later rows that carry none (payment-notice emails).
 const NOW = (() => {
-  let i = TX.length - 1
-  while (i >= 0 && TX[i].bal == null) i--
-  if (i < 0) return null
-  return { bal: TX[i].bal! + TX.slice(i + 1).reduce((s, r) => s + r.amt, 0), at: TX[i].date.slice(0, 10) }
+  const { total, parts } = balanceNow(TX)
+  return parts.length ? { bal: total, parts } : null
 })()
 
 // The real date (local), re-checked every minute so an open tab rolls over at midnight.
@@ -49,8 +47,8 @@ export function Predict() {
         <CardTitle>How long will my money last?</CardTitle>
         <CardDescription>
           Current money ÷ spending rate, assuming the rate stays flat. Today is {today}; the newest record is {LAST}
-          {stale > 0 ? ` (${stale} day${stale === 1 ? '' : 's'} ago, assumed spent at the same rate)` : ''}. Balance as of {NOW.at}
-          {NOW.at < LAST ? ` plus payments up to ${LAST}` : ''}. A rough guide, not a forecast.
+          {stale > 0 ? ` (${stale} day${stale === 1 ? '' : 's'} ago, assumed spent at the same rate)` : ''}. Money: {NOW.parts.map((p) => `${bankName(p.bank)} ${baht(p.bal)} (statement to ${p.at}${p.est ? ' + payment emails' : ''})`).join(' · ')}.
+          Transfers between your own accounts don't count as spending. A rough guide, not a forecast.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
