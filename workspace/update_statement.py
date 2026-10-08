@@ -26,13 +26,12 @@ import csv
 import getpass
 import glob
 import os
-import re
 import sys
 from datetime import datetime, timedelta
 
 import build_dashboard
 import config  # loads the project's env settings (KTB_PW, KBANK_PW, ...) into os.environ
-from extract_ledger import extract, write_csv
+from extract_ledger import extract, is_kbank, password_for, write_csv
 from txid import differences, stamp_ids
 
 # Anchor paths to this script's folder so it runs from any working directory.
@@ -47,15 +46,10 @@ def passwords(cache=[]):
     return cache
 
 
-def is_kbank(path):
-    """KBank statements are named STM_...; Gmail downloads prefix the name with 8 hex chars + '_'."""
-    return re.sub(r"^[0-9a-f]{8}_", "", os.path.basename(path)).startswith("STM")
-
-
 def candidates(path):
     """Passwords to try for one file, its own bank's first. STATEMENT_PW is the old name of KTB_PW."""
-    ktb, kbank = os.environ.get("KTB_PW") or os.environ.get("STATEMENT_PW"), os.environ.get("KBANK_PW")
-    own, other = (kbank, ktb) if is_kbank(path) else (ktb, kbank)
+    own = password_for(path)
+    other = password_for("STM.pdf" if not is_kbank(path) else "x.pdf")   # the other bank's password
     out = []
     for pw in (None, own, other, *passwords()):   # None: the file may not be encrypted
         if pw not in out and (pw is None or pw):
@@ -63,18 +57,25 @@ def candidates(path):
     return out
 
 
+def why(e):
+    """Error type plus any wrapped error types, e.g. 'PdfminerException: PDFPasswordIncorrect' (never contents)."""
+    inner = [type(a).__name__ for a in getattr(e, "args", ()) if isinstance(a, BaseException)]
+    return type(e).__name__ + (f": {', '.join(inner)}" if inner else "")
+
+
 def load(path):
     """Extract rows from a PDF: no password, then each known password, then ask (if someone can answer)."""
-    from pdfminer.pdfdocument import PDFPasswordIncorrect
+    errors = []
     for pw in candidates(path):
         try:
             return extract(path, pw)
-        except Exception as e:      # pdfplumber wraps PDFPasswordIncorrect in a PdfminerException
-            if not any(isinstance(x, PDFPasswordIncorrect) for x in (e, *e.args)):
-                raise              # a real parse problem: let main() report it, don't hide it
+        except ValueError:
+            raise                  # it opened, but the rows don't add up (KBank totals check): report, don't retry
+        except Exception as e:     # wrong password, or an encrypted file tried without one (the error type varies
+            errors.append(e)       # by PDF: KBank says PDFPasswordIncorrect, others raise other pdfminer errors)
     if not sys.stdin.isatty():      # cron / watcher: nobody to ask. Stop rather than write a ledger missing this file.
-        sys.exit(f"No known password opens {os.path.basename(path)}. Set KTB_PW / KBANK_PW in the env "
-                 "settings (see .env.example) or run this by hand to type it. Ledger left unchanged.")
+        sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set KTB_PW / KBANK_PW "
+                 "in the env settings (see .env.example) or run this by hand to type it. Ledger left unchanged.")
     pw = getpass.getpass(f"{'KBank' if is_kbank(path) else 'KTB'} password for {os.path.basename(path)}: ")
     rows = extract(path, pw)
     passwords().append(pw)          # reuse for the next file
@@ -88,7 +89,7 @@ def own_transfers(rows):
     "Own transfer", which the dashboard leaves out of income, expenses and the spend rate.
     ponytail: greedy 1:1 scan; an unrelated same-amount pair inside 2 minutes would also match.
     """
-    when = lambda r: datetime.strptime(r["Date"], "%Y-%m-%d %H:%M")
+    when = lambda r: datetime.fromisoformat(r["Date"])   # time is optional
     banks = [r for r in rows if r.get("Bank") not in (None, "", "Manual")]
     used = set()
     for a in banks:
@@ -121,7 +122,7 @@ def main() -> int:
         except Exception as e:
             reason = (str(e).splitlines() or [type(e).__name__])[0][:60]
             skipped.append((name, reason))
-            print(f"  SKIP {name}: could not read ({type(e).__name__})")
+            print(f"  SKIP {name}: could not read ({why(e)})")
             continue
         new = 0
         for r in stamp_ids(rows):
@@ -145,7 +146,7 @@ def main() -> int:
         added = 0
         stmt = list(merged)          # statement rows only (before any manual row is added)
         claimed = set()              # statement rows already matched to a manual row
-        when = lambda r: datetime.strptime(r["Date"], "%Y-%m-%d %H:%M")
+        when = lambda r: datetime.fromisoformat(r["Date"])   # time is optional
         for r in extra:
             if r["ID"] in by_id:     # the bank statement already has it
                 claimed.add(r["ID"])
