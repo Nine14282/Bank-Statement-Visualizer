@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 
 import build_dashboard
 import config  # loads the project's env settings (KTB_PW, KBANK_PW, ...) into os.environ
-from extract_ledger import extract, is_kbank, password_for, write_csv
+from extract_ledger import BANKS, bank_from_name, extract, write_csv
 from txid import differences, stamp_ids
 
 # Anchor paths to this script's folder so it runs from any working directory.
@@ -47,11 +47,12 @@ def passwords(cache=[]):
 
 
 def candidates(path):
-    """Passwords to try for one file, its own bank's first. STATEMENT_PW is the old name of KTB_PW."""
-    own = password_for(path)
-    other = password_for("STM.pdf" if not is_kbank(path) else "x.pdf")   # the other bank's password
+    """Passwords to try for one file: none, its own bank's settings first (by file name), then every other
+    bank's (a file may be named unusually), then any typed this run. STATEMENT_PW is the old name of KTB_PW."""
+    own = bank_from_name(path)
+    keys = [*(own.passwords if own else ()), *(k for b in BANKS for k in b.passwords)]
     out = []
-    for pw in (None, own, other, *passwords()):   # None: the file may not be encrypted
+    for pw in (None, *(os.environ.get(k) for k in keys), *passwords()):   # None: the file may not be encrypted
         if pw not in out and (pw is None or pw):
             out.append(pw)
     return out
@@ -74,9 +75,12 @@ def load(path):
         except Exception as e:     # wrong password, or an encrypted file tried without one (the error type varies
             errors.append(e)       # by PDF: KBank says PDFPasswordIncorrect, others raise other pdfminer errors)
     if not sys.stdin.isatty():      # cron / watcher: nobody to ask. Stop rather than write a ledger missing this file.
-        sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set KTB_PW / KBANK_PW "
-                 "in the env settings (see .env.example) or run this by hand to type it. Ledger left unchanged.")
-    pw = getpass.getpass(f"{'KBank' if is_kbank(path) else 'KTB'} password for {os.path.basename(path)}: ")
+        keys = " / ".join(b.passwords[0] for b in BANKS)
+        sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
+                 "in the env settings (see .env.example), run ./run.sh --setup, or run this by hand to type it. "
+                 "Ledger left unchanged.")
+    named = bank_from_name(path)
+    pw = getpass.getpass(f"{named.name if named else 'PDF'} password for {os.path.basename(path)}: ")
     rows = extract(path, pw)
     passwords().append(pw)          # reuse for the next file
     return rows
@@ -115,6 +119,7 @@ def main() -> int:
         return 1
 
     by_id, merged, skipped, conflicts = {}, [], [], []
+    reworded = 0
     for path in pdfs:
         name = os.path.basename(path)
         try:
@@ -130,12 +135,21 @@ def main() -> int:
             old = by_id.get(r["ID"])
             if old is not None:      # same minute + same signed amount + same occurrence = same transaction
                 diff = differences(old, r)
-                if diff:
+                if diff == ["description differs"]:
+                    # Same money, new wording: the bank renamed the type in a later statement (e.g. จ่ายค่าสินค้า/บริการ
+                    # (CGSWP) became หักบัญชีอัตโนมัติ (CGSWP)). Files load oldest first (Gmail ids grow over time), so
+                    # take the newer wording; then one payee reads the same in every month and labels match all of it.
+                    old["Description"], old["Category"] = r["Description"], r["Category"]
+                    reworded += 1
+                elif diff:
                     conflicts.append(f"{r['Date']}  {float(r['Amount']):+,.2f}  in {name}: {', '.join(diff)}")
                 continue
             by_id[r["ID"]] = r; merged.append(r); new += 1
         print(f"  {name}: {len(rows):>4} rows, {new:>4} new, "
               f"{len(rows) - new:>4} duplicate")
+
+    if reworded:
+        print(f"  {reworded} row(s) took the newer statement's wording for the same transaction")
 
     # Hand-entered rows (spends no bank record covers) live in manual_entries.csv.
     manual = os.path.join(HERE, "manual_entries.csv")
@@ -157,14 +171,20 @@ def main() -> int:
             if "(email)" in r["Description"]:
                 # Payment-notice emails carry the payment time, but the statement can post bills minutes to
                 # hours later. Same amount within 4h of a not-yet-matched statement row = same transaction.
-                # ponytail: 4h window, 1:1 greedy; widen/narrow if bills post later/earlier than that
+                # "Future Amount" rows are payments made after KTB's nightly cut-off (~23:00), posted ~01:30-02:30
+                # the next day: they get 6h so a late-evening notice still finds its statement row.
+                # ponytail: fixed windows, 1:1 greedy; widen/narrow if bills post later/earlier than that
                 hit = next((s for s in stmt if s["ID"] not in claimed and s.get("Bank") == "KTB"
                             and float(s["Amount"]) == float(r["Amount"])
-                            and abs(when(s) - when(r)) <= timedelta(hours=4)), None)
+                            and abs(when(s) - when(r)) <= timedelta(hours=6 if "Future Amount" in s["Description"] else 4)), None)
                 if hit:
                     claimed.add(hit["ID"])
                     print(f"  notice matched to statement row, skipped: {r['Date']}  {float(r['Amount']):+,.2f}  "
                           f"(statement {hit['Date']})")
+                    if "Future Amount" in hit["Description"]:
+                        # The statement prints when the bank posted it (~01:48 next day); the notice says when it was
+                        # paid. Keep the paid time. Amount, balance and ID stay the statement's.
+                        hit["Date"] = r["Date"]
                     continue
             by_id[r["ID"]] = r; merged.append(r); added += 1
         print(f"  manual entries: {added} added of {len(extra)}")
