@@ -122,7 +122,8 @@ def main() -> int:
         except Exception as e:
             reason = (str(e).splitlines() or [type(e).__name__])[0][:60]
             skipped.append((name, reason))
-            print(f"  SKIP {name}: could not read ({why(e)})")
+            detail = f": {e}" if isinstance(e, ValueError) else ""   # our own parse checks explain themselves
+            print(f"  SKIP {name}: could not read ({why(e)}{detail})")
             continue
         new = 0
         for r in stamp_ids(rows):

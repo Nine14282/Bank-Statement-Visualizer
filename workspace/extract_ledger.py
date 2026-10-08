@@ -258,15 +258,16 @@ def parse_kbank(pdf_path: str, password: str | None = None):
                     "Balance": f"{r['bal']:.2f}", "Bank": "KBANK"})
 
     # The statement prints its own totals; the parsed rows must reproduce them exactly.
+    # A total the statement doesn't print (other layout/language) is skipped, never compared against 0.
     def total(label):
-        m = re.search(label + r"\s+\d+\s+รายการ\s+([\d,]+\.\d{2})", head)
-        return _num(m.group(1)) if m else 0.0
-    end = re.search(r"ยอดยกไป\s+([\d,]+\.\d{2})", head)
-    checks = [("withdrawals", wd_sum, total("รวมถอนเงิน")), ("deposits", dep_sum, total("รวมฝากเงิน"))]
-    if end and prev is not None:
-        checks.append(("closing balance", prev, _num(end.group(1))))
+        m = re.search(label + r"\s+\d+\s+(?:รายการ|Items?|Transactions?)\s+([\d,]+\.\d{2})", head, re.I)
+        return _num(m.group(1)) if m else None
+    end = re.search(r"(?:ยอดยกไป|Ending Balance)\s+([\d,]+\.\d{2})", head, re.I)
+    checks = [("withdrawals", wd_sum, total("รวมถอนเงิน|Total Withdrawal")),
+              ("deposits", dep_sum, total("รวมฝากเงิน|Total Deposit")),
+              ("closing balance", prev, _num(end.group(1)) if end else None)]
     for what, got, want in checks:
-        if abs(got - want) > 0.011:
+        if want is not None and got is not None and abs(got - want) > 0.011:
             raise ValueError(f"KBank {what}: parsed {got:,.2f} but the statement says {want:,.2f}")
     return out
 
