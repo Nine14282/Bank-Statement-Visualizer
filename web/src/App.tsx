@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react'
 import LinearProgress from '@mui/material/LinearProgress'
 import MuiTooltip from '@mui/material/Tooltip'
 import { useColorScheme } from '@mui/material/styles'
-import { ArrowRight, ArrowRightLeft, CircleAlert, CircleCheck, LayoutDashboard, ListOrdered, Moon, Sun, TrendingUp } from 'lucide-react'
+import { ArrowRight, ArrowRightLeft, CircleAlert, CircleCheck, Hourglass, LayoutDashboard, ListOrdered, Moon, Sun, TrendingUp } from 'lucide-react'
 import { BalanceArea, MonthlyBars } from '@/components/ledger/charts'
 import { CategoryCard } from '@/components/ledger/categories'
 import { Kpi, KpiGrid } from '@/components/ledger/kpi'
+import { Predict } from '@/components/ledger/predict'
 import { Index, SpendRate } from '@/components/ledger/spend-rate'
 import { TxTable } from '@/components/ledger/tx-table'
 import { Button } from '@/components/ui/button'
@@ -178,6 +179,9 @@ function Dashboard() {
                   <SidebarMenuButton onClick={() => goTo('spend-rate')}><TrendingUp />Spend rate</SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => goTo('predict')}><Hourglass />Predict</SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
                   <SidebarMenuButton onClick={() => goTo('transactions')}><ListOrdered />Transactions</SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -287,6 +291,8 @@ function Dashboard() {
               </section>
 
               <SpendRate />
+
+              <Predict />
 
               <TxTable rows={rows} caption={`${s.n} transactions · ${range}`} />
           </>

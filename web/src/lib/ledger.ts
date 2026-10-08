@@ -90,6 +90,8 @@ export type Summary = ReturnType<typeof summarize>
 /* ---------- spend rate (฿/day per month inside a date range) ---------- */
 const NOT_SPEND = new Set(['Cash withdrawal', 'Lent out', 'Stock investment'])  // own money moving, not consumed
 const utcDay = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5
+export const daysBetween = (a: string, b: string) => utcDay(b) - utcDay(a)
+export const addDays = (d: string, n: number) => new Date((utcDay(d) + n) * 864e5).toISOString().slice(0, 10)
 const mEnd = (k: string) => new Date(Date.UTC(+k.slice(0, 4), +k.slice(5), 0)).toISOString().slice(0, 10)
 const median = (a: number[]) => {
   const s = [...a].sort((x, y) => x - y), h = s.length >> 1
@@ -104,7 +106,7 @@ export function monthsBack(n: number) {
 
 export type RateRow = { days: number; spend: number; inc: number; out: number; rate: number }
 
-function rateRow(a: string, b: string, cash: boolean): RateRow {
+export function rateRow(a: string, b: string, cash: boolean): RateRow {
   let spend = 0, inc = 0, out = 0
   for (const t of TX) {
     const d = t.date.slice(0, 10)
