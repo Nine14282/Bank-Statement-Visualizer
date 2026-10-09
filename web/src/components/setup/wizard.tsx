@@ -14,8 +14,13 @@ import { THEMES, type useTheme } from '@/lib/themes'
 import { EASE, cn } from '@/lib/utils'
 
 // First-run setup, shown when ./run.sh's local server (workspace/welcome.py) opens the page at /?setup.
+// Later runs open the short "add statements" version at /?setup&add (welcome.py --add): no welcome, theme or
+// spending steps, and finishing leaves the saved theme and expected spending alone.
 // One screen per step, no page scroll. The server already swapped its one-time link token for an HttpOnly cookie
 // (sent automatically); every call adds the X-Setup header, which other sites can't send without a CORS preflight.
+const ADD = new URLSearchParams(location.search).has('add')
+const STEPS = ADD ? ['Statements', 'Passwords', 'Finish'] as const : ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 'Finish'] as const
+
 const api: Api = async (path, body, raw = false) => {
   const r = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -23,7 +28,7 @@ const api: Api = async (path, body, raw = false) => {
     body: body === undefined ? undefined : raw ? (body as Blob) : JSON.stringify(body),
   })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(j.error ?? (r.status === 403 ? 'Setup session ended. Run ./run.sh --setup again.' : `The setup server answered ${r.status}. Is ./run.sh still running?`))
+  if (!r.ok) throw new Error(j.error ?? (r.status === 403 ? `This page's session ended. Run ${ADD ? './run.sh' : './run.sh --setup'} again.` : `The setup server answered ${r.status}. Is ./run.sh still running?`))
   return j
 }
 
@@ -31,8 +36,6 @@ type BankRow = { id: string; name: string; saved: boolean }
 type FileRow = { name: string; bank: string | null; locked: boolean; ok: boolean; uploaded: boolean }
 type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[] }
 type Api = (path: string, body?: unknown, raw?: boolean) => Promise<any>   // JSON from welcome.py; each caller reads its own fields
-
-const STEPS = ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 'Finish']
 
 
 const primary = 'inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-[0_8px_20px_-8px_var(--brand)] transition hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none'
@@ -54,40 +57,34 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
   const files = st?.files ?? []
   const lockedBanks = [...new Set(files.filter((f) => f.locked && f.bank).map((f) => f.bank!))]
   const [uploading, setUploading] = useState(0)
-  const canNext = [
-    true,
-    files.length > 0 && files.every((f) => f.bank) && !uploading,
-    files.every((f) => f.ok),
-    true,
-    true,
-    true,
-  ][step]
-  const hint = [
-    '',
-    !files.length ? 'Add at least one statement to continue' : files.some((f) => !f.bank) ? 'Pick the bank for each file' : '',
-    files.some((f) => !f.ok) ? 'Unlock every bank to continue' : '',
-    '', 'Optional: you can skip this', '',
-  ][step]
+  const name = STEPS[step]
+  // A bank is only needed to route a password: an unrecognised file that opens without one (e.g. a non-statement
+  // PDF from a statement email) doesn't block, and the build just reads nothing from it.
+  const canNext = name === 'Statements' ? files.length > 0 && files.every((f) => f.bank || f.ok) && !uploading
+    : name === 'Passwords' ? files.every((f) => f.ok) : true
+  const hint = name === 'Statements' ? (!files.length ? 'Add at least one statement to continue' : files.some((f) => !f.bank && !f.ok) ? 'Pick the bank for each locked file' : '')
+    : name === 'Passwords' ? (files.some((f) => !f.ok) ? 'Unlock every bank to continue' : '')
+    : name === 'Spending' ? 'Optional: you can skip this' : ''
 
   const go = (d: number) => { setError(''); setStep((s) => s + d) }
   const finish = async () => {
     setBuilding(true)
     setResult(null)
-    try { setResult(await api('/api/finish', { theme: theme.id, plan })) }
+    try { setResult(await api('/api/finish', ADD ? {} : { theme: theme.id, plan })) }
     catch (e) { setResult({ ok: false, log: (e as Error).message }) }
     setBuilding(false)
   }
 
-  const body: ReactNode = [
-    null,   // step 0 is the full-screen Hero, rendered above
-    <Statements key="s" api={api} st={st} refresh={refresh} onError={setError} onBusy={setUploading} />,
-    <Passwords key="p" api={api} st={st} banks={lockedBanks} refresh={refresh} />,
-    <ThemeStep key="t" current={theme.id} pick={pickTheme} />,
-    <Spending key="e" plan={plan} setPlan={setPlan} />,
-    <Finish key="f" building={building} result={result} retry={finish} />,
-  ][step]
+  const body: ReactNode = {
+    Welcome: null,   // the full-screen Hero, rendered below
+    Statements: <Statements key="s" api={api} st={st} refresh={refresh} onError={setError} onBusy={setUploading} />,
+    Passwords: <Passwords key="p" api={api} st={st} banks={lockedBanks} refresh={refresh} />,
+    Theme: <ThemeStep key="t" current={theme.id} pick={pickTheme} />,
+    Spending: <Spending key="e" plan={plan} setPlan={setPlan} />,
+    Finish: <Finish key="f" building={building} result={result} retry={finish} />,
+  }[name]
 
-  if (step === 0) return <Hero onStart={() => go(1)} />
+  if (name === 'Welcome') return <Hero onStart={() => go(1)} />
 
   return (
     <div className="relative flex h-dvh flex-col overflow-hidden" data-od-id="setup-wizard">
@@ -100,7 +97,7 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
         <span className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-lg text-background" aria-hidden>฿</span>
         <div className="min-w-0">
           <p className="text-sm font-medium">Statement Visualizer</p>
-          <p className="text-xs text-muted-foreground">Setup · step {step + 1} of {STEPS.length}</p>
+          <p className="text-xs text-muted-foreground">{ADD ? 'Add statements' : 'Setup'} · step {step + 1} of {STEPS.length}</p>
         </div>
         <ol className="ml-auto hidden items-center gap-1 rounded-full border bg-card p-1 md:flex" aria-label="Setup steps">
           {STEPS.map((s, i) => (
@@ -137,11 +134,11 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
           <span className="min-w-0 flex-1 truncate text-center text-xs text-muted-foreground">{hint}</span>
           {step < STEPS.length - 1 ? (
             <button type="button" className={primary} disabled={!canNext} onClick={() => go(1)}>
-              {step === 0 ? 'Get started' : step === 4 && !plan.length ? 'Skip' : 'Next'}<ArrowRight className="size-4" />
+              {name === 'Spending' && !plan.length ? 'Skip' : 'Next'}<ArrowRight className="size-4" />
             </button>
           ) : (
             <button type="button" className={primary} disabled={building} onClick={finish}>
-              {building ? <><Loader2 className="size-4 animate-spin" />Building…</> : <>Build my dashboard<ArrowRight className="size-4" /></>}
+              {building ? <><Loader2 className="size-4 animate-spin" />Building…</> : <>{ADD ? 'Update my dashboard' : 'Build my dashboard'}<ArrowRight className="size-4" /></>}
             </button>
           )}
         </footer>
@@ -215,10 +212,14 @@ function Statements({ api, st, refresh, onError, onBusy }: {
     onBusy(0)
     await refresh()
   }
-  const files = st?.files ?? []
+  // The add page lists only what's new or needs a bank picked; older files are summed up in one line.
+  const all = st?.files ?? []
+  const files = ADD ? all.filter((f) => f.uploaded || !f.bank) : all
+  const older = all.length - files.length
   return (
-    <Frame title="Add your statements" icon={<Upload className="size-5" />}
-      sub={<>PDF statements from your bank, as many as you have. Supported: {(st?.banks ?? []).map((b) => b.name).join(', ') || '…'}.</>}>
+    <Frame title={ADD ? 'Add new statements' : 'Add your statements'} icon={<Upload className="size-5" />}
+      sub={ADD ? <>Drop the PDFs your bank sent since last time. Supported: {(st?.banks ?? []).map((b) => b.name).join(', ') || '…'}.</>
+        : <>PDF statements from your bank, as many as you have. Supported: {(st?.banks ?? []).map((b) => b.name).join(', ') || '…'}.</>}>
       <label onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); add(e.dataTransfer.files) }}
         className={cn('flex cursor-pointer flex-col items-center gap-1.5 rounded-2xl border-2 border-dashed px-4 py-6 text-center transition-colors focus-within:ring-2 focus-within:ring-ring/40',
@@ -229,14 +230,14 @@ function Statements({ api, st, refresh, onError, onBusy }: {
         <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" onChange={(e) => { add(e.target.files); e.target.value = '' }} />
       </label>
       <ul className="min-h-0 divide-y overflow-y-auto rounded-2xl border" aria-label="Statements">
-        {!files.length && !busy.length && <li className="px-4 py-5 text-center text-sm text-muted-foreground">No statements yet.</li>}
+        {!files.length && !busy.length && <li className="px-4 py-5 text-center text-sm text-muted-foreground">{ADD ? 'No new statements yet.' : 'No statements yet.'}</li>}
         {files.map((f) => (
           <li key={f.name} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
             {f.bank ? <BankLogo bank={f.bank} size={30} /> : <span className="grid size-[30px] place-items-center rounded-full bg-muted"><FileText className="size-4" /></span>}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium" title={f.name}>{f.name}</span>
               <span className="block text-xs text-muted-foreground">
-                {f.bank ? bankName(f.bank) : 'Bank not recognised'} · {f.locked ? (f.ok ? 'unlocked' : 'password needed') : 'no password'}
+                {f.bank ? bankName(f.bank) : f.ok ? 'Not recognised as a statement (adds nothing)' : 'Bank not recognised'} · {f.locked ? (f.ok ? 'unlocked' : 'password needed') : 'no password'}
                 {!f.uploaded && ' · already in Statement/'}
               </span>
             </span>
@@ -261,6 +262,11 @@ function Statements({ api, st, refresh, onError, onBusy }: {
           </li>
         ))}
       </ul>
+      {older > 0 && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Check className="size-3.5 text-pos" />{older} statement{older === 1 ? '' : 's'} already in Statement/ will be read again too.
+        </p>
+      )}
     </Frame>
   )
 }
@@ -425,6 +431,18 @@ function Finish({ building, result, retry }: { building: boolean; result: { ok: 
         sub="Your choices are saved. Fix the problem below (often a missing password: go Back), then try again.">
         <pre className="num min-h-0 overflow-auto whitespace-pre-wrap rounded-2xl border bg-muted/40 p-3 text-xs">{result.log}</pre>
         <button type="button" className={cn(primary, 'self-start')} onClick={retry}>Try again</button>
+      </Frame>
+    )
+  }
+  if (ADD) {
+    return (
+      <Frame title="Ready to update" icon={<Check className="size-5" />}
+        sub="Reads every statement in Statement/, new ones included, and rebuilds your dashboard.">
+        <p className="rounded-2xl border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          Tired of adding statements by hand? <code className="num">./gmail.sh</code> can fetch them from Gmail by itself
+          (README, “Option 2”).
+        </p>
+        <p className="text-xs text-muted-foreground">{building ? 'Reading your statements and building the dashboard…' : 'Press “Update my dashboard” when you are ready.'}</p>
       </Frame>
     )
   }

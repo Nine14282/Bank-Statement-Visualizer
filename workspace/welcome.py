@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""First-run setup wizard. ./run.sh starts it on the first run (no ledger yet) or with --setup.
+"""Setup wizard and "add statements" page. ./run.sh starts the full setup on the first run (no ledger yet) or
+with --setup, and the short add page (--add: statements, passwords, update) on every later run.
 
-A small local server serves the dashboard page with ?setup, which shows the setup wizard instead of the
-dashboard (web/src/components/setup/wizard.tsx), and answers its API calls:
+A small local server serves the dashboard page with ?setup (plus &add in add mode), which shows the wizard
+instead of the dashboard (web/src/components/setup/wizard.tsx), and answers its API calls:
 
   GET  /api/state            banks, statements in Statement/, the current theme and expected spending
   POST /api/upload?name=X    body = one PDF: saved into Statement/, its bank detected
   POST /api/remove           {name}: delete a file uploaded in this session (never an older one)
   POST /api/bank             {name, bank}: the user says which bank a file is from
   POST /api/password         {bank, password, remember}: opens and parses that bank's locked files with it
-  POST /api/finish           {theme, plan}: save the choices, build the ledger + dashboard, open it, stop
+  POST /api/finish           {theme, plan}: save the choices (each only if sent), build the ledger + dashboard,
+                             open it, stop
 
 Only this computer can reach it (127.0.0.1, random port). The printed link carries a random one-time token: the
 first visit swaps it for an HttpOnly, SameSite=Strict cookie and redirects to a clean URL, so a copy of the link
 (e.g. read from the browser's command line in `ps` by another user of this computer) is already spent. Every
 later request needs that cookie plus an X-Setup header other sites can't send. Passwords are kept in memory unless
-"remember" saves them to the settings file. Usage: python welcome.py
+"remember" saves them to the settings file. Usage: python welcome.py [--add]
 """
 import contextlib
 import io
@@ -50,6 +52,8 @@ def say(msg: str) -> None:
 def note(msg: str) -> None:
     print(f"  {msg}", flush=True)
 STATEMENTS = os.path.join(os.path.dirname(HERE), "Statement")
+ADD = "--add" in sys.argv[1:]                          # the short "add statements" page, not the full setup
+AGAIN = "./run.sh" if ADD else "./run.sh --setup"     # what gives a fresh page
 TOKEN = secrets.token_urlsafe(24)       # one-time: in the printed link, good for the first visit only
 SESSION = secrets.token_urlsafe(32)     # the cookie that visit gets; never printed or put in a URL
 TOKEN_USED = threading.Event()
@@ -168,10 +172,11 @@ def finish(server, theme: str, plan) -> dict:
         if not re.fullmatch(r"[a-z0-9-]{1,30}", theme):
             raise ValueError("Bad theme.")
         config.save("THEME", theme)
-    fd = os.open(EXPECTED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(clean_plan(plan), f, ensure_ascii=False)
-    say(f"Saved your choices (theme: {theme or 'default'}, {len(clean_plan(plan))} expected-spending item(s))")
+    if plan is not None:               # the add page sends none: the saved list stays as it is
+        fd = os.open(EXPECTED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(clean_plan(plan), f, ensure_ascii=False)
+        say(f"Saved your choices (theme: {theme or 'default'}, {len(clean_plan(plan))} expected-spending item(s))")
     say("Reading your statements and building the ledger and dashboard…")
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -183,7 +188,7 @@ def finish(server, theme: str, plan) -> dict:
     log = buf.getvalue()
     sys.stdout.write(log)
     if code:
-        say("The build stopped; the setup page shows why. Fix it there and press Try again.")
+        say("The build stopped; the page shows why. Fix it there and press Try again.")
         return {"ok": False, "log": log[-3000:]}
     say(f"Done. Opening your dashboard: {OUT}")
     # Done: open the dashboard (a file on disk, which a web page can't link to) and stop the server.
@@ -236,14 +241,14 @@ class Handler(BaseHTTPRequestHandler):
                 TOKEN_USED.set()       # first visit: swap the link's token for a cookie, then drop it from the URL
                 self.send_response(303)
                 self.send_header("Set-Cookie", f"{self.cookie_name()}={SESSION}; HttpOnly; SameSite=Strict; Path=/")
-                self.send_header("Location", "/?setup")
+                self.send_header("Location", "/?setup&add" if ADD else "/?setup")
                 self.send_header("Content-Length", "0")
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return None
             if self.signed_in():
                 return self.send(200, open(OUT, "rb").read(), "text/html; charset=utf-8")
-            return self.send(403, b"This setup link has already been used (or is wrong). Run ./run.sh --setup for a new one.",
+            return self.send(403, f"This link has already been used (or is wrong). Run {AGAIN} for a new one.".encode(),
                              "text/plain")
         if url.path == "/api/state" and self.api_ok():
             with LOCK:
@@ -305,13 +310,14 @@ def main() -> int:
     if sys.argv[1:] == ["--selfcheck"]:
         selfcheck()
         return 0
-    say("Building the setup page (it is part of the dashboard)")
+    page = "The add-statements page" if ADD else "The setup page"
+    say(f"Building {page.lower()} (it is part of the dashboard)")
     build()                 # make sure web/dist/index.html (which holds the wizard) is current
     say("Looking at the statements already in Statement/")
     scan()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/?setup={TOKEN}"
-    say("Setup page is ready (this computer only). Opening it in your browser…")
+    say(f"{page} is ready (this computer only). Opening it in your browser…")
     note(f"If it didn't open, go to: {url}")
     note("Leave this window open while you use the page. What you do there is logged below. Ctrl+C quits.")
     webbrowser.open(url)
@@ -319,7 +325,7 @@ def main() -> int:
         server.serve_forever()
     except KeyboardInterrupt:
         print()
-        say("Setup closed before finishing. Run ./run.sh --setup to continue.")
+        say(f"Closed before finishing. Run {AGAIN} to continue.")
         return 0
     print(f"Dashboard: {OUT}")
     return 0
