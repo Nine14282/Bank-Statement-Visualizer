@@ -5,11 +5,11 @@ export type Gaps = { months: string[]; breaks: { after: string; before: string; 
 // theme / plan: picked in the setup wizard (THEME setting, workspace/expected.json); absent in older ledgers.
 export type Meta = { account: string; name: string; from: string; to: string; n: number; gaps: Gaps; theme?: string; plan?: PlanItem[] }
 
-// ledger.json is written by build_dashboard.py and git-ignored, so it is absent on a fresh clone:
-// the glob then matches nothing and the app shows its empty state instead of failing to build.
-const files = import.meta.glob<{ default: { meta: Meta; tx: Tx[] } }>('../data/ledger.json', { eager: true })
+// The ledger is not part of the build: build_dashboard.py writes it into the page's <script id="ledger-data"> tag
+// (the vite dev server does the same from src/data/ledger.json). So the committed prebuilt page holds no data, and
+// users need no Node: null (the untouched placeholder) = no data yet, and the app shows its empty state.
 const EMPTY = { meta: { account: '', name: '', from: '', to: '', n: 0, gaps: { months: [], breaks: [] } }, tx: [] }
-export const DATA: { meta: Meta; tx: Tx[] } = Object.values(files)[0]?.default ?? EMPTY
+export const DATA: { meta: Meta; tx: Tx[] } = JSON.parse(document.getElementById('ledger-data')?.textContent || 'null') ?? EMPTY
 export const TX = DATA.tx
 
 /* ---------- your own labels: "description contains X" -> label (+ optional category), kept in this browser ---------- */

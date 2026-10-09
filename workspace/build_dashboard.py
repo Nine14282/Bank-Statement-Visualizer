@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
-"""Build the dashboard: ledger.csv -> web/src/data/ledger.json -> web/dist/index.html.
+"""Build the dashboard: ledger.csv -> web/dist/index.html, with Python only (no Node needed).
 
-The dashboard is the React app in web/ (Vite single-file build, opens offline from
-disk). This script checks ledger.csv, prints the summary and any coverage warnings,
-writes the JSON the app imports, then runs `npm run build` in web/.
+The dashboard is the React app in web/, built once by its developers into one self-contained page with no data,
+web/prebuilt/index.html (committed). This script checks ledger.csv, prints the summary and any coverage warnings,
+and writes that page with the ledger filled into its <script id="ledger-data"> tag. It also writes
+web/src/data/ledger.json, which only the `npm run dev` server reads.
 
-Usage: python build_dashboard.py
+Usage: python build_dashboard.py      (python build_dashboard.py --selfcheck: the data-injection check)
 """
 import csv
 import datetime
 import json
 import os
-import shutil
-import subprocess
 import sys
+import time
 
 import config  # loads the project's env settings into os.environ
-from extract_ledger import BANKS
 
 # Anchor paths to this script's folder so it runs from any working directory.
 HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
@@ -24,14 +23,13 @@ ROOT = os.path.dirname(HERE)                         # project root
 
 CSV = os.path.join(HERE, "ledger.csv")
 WEB = os.path.join(ROOT, "web")
-JSON_OUT = os.path.join(WEB, "src", "data", "ledger.json")
+SHELL = os.path.join(WEB, "prebuilt", "index.html")   # the app without data: `npm run build` in web/ makes it
+JSON_OUT = os.path.join(WEB, "src", "data", "ledger.json")   # for the dev server only
 OUT = os.path.join(WEB, "dist", "index.html")      # the dashboard
+# The placeholder in web/index.html (and so in the prebuilt page) that the data replaces; same text in vite.config.ts.
+MARK = '<script id="ledger-data" type="application/json">null</script>'
 
-# Secrets loaded from the settings file are NOT passed to npm: its install scripts and build plugins
-# (hundreds of third-party packages) would otherwise inherit them through the environment.
-SECRET_ENV = (*(k for b in BANKS for k in b.passwords), "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_PROJECT_ID")
-
-# Optional labels shown in the dashboard sidebar (set in the env settings, see .env.example).
+# Optional labels shown in the dashboard top bar: the avatar tooltip and the greeting (env settings, see .env.example).
 ACCOUNT = os.environ.get("ACCOUNT_LABEL", "")
 NAME = os.environ.get("ACCOUNT_HOLDER", "")
 # Picked in the setup wizard: the dashboard's default theme (an id from web/src/lib/themes.ts), and the
@@ -120,7 +118,7 @@ def build(csv_path: str = CSV) -> None:
         inc = sum(t["amt"] for t in tx if t["amt"] > 0)
         exp = -sum(t["amt"] for t in tx if t["amt"] < 0)
         years = sorted({t["date"][:4] for t in tx})
-        print(f"ledger.csv: {len(tx)} transactions -> {JSON_OUT}")
+        print(f"ledger.csv: {len(tx)} transactions")
         print(f"  Income {inc:,.2f}  ·  Expense {exp:,.2f}  ·  Net {inc - exp:,.2f}")
         print(f"  Years: {', '.join(years)}")
         for m in gaps["months"]:
@@ -131,17 +129,45 @@ def build(csv_path: str = CSV) -> None:
         if not gaps["months"] and not gaps["breaks"]:
             print("  Coverage OK: no empty months, balance continuous")
 
-    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
-    npm = shutil.which("npm")
-    if not npm:
-        sys.exit("npm not found: install Node.js, then run `npm install` in web/ and re-run.")
-    if not os.path.isdir(os.path.join(WEB, "node_modules")):
-        print("  Installing web packages (npm install), once…", flush=True)
-        subprocess.run([npm, "install"], cwd=WEB, check=True, env=env)
-    print("  Building the web page (npm run build, a few seconds)…", flush=True)
-    subprocess.run([npm, "run", "build"], cwd=WEB, check=True, stdout=subprocess.DEVNULL, env=env)
+    try:
+        shell = open(SHELL, encoding="utf-8").read()
+    except OSError:
+        sys.exit(f"Missing {SHELL}: it ships with the project. Restore it (git checkout web/prebuilt) or, if you "
+                 "changed the web app, run `npm install && npm run build` in web/ (needs Node.js 20+).")
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    tmp = OUT + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(inject(shell, payload))
+    os.replace(tmp, OUT)    # an open dashboard tab never reloads into a half-written file
+    # An open dashboard polls this file (a <script>, which works from file:// where fetch doesn't) and reloads
+    # when the number changes.
+    with open(os.path.join(os.path.dirname(OUT), "version.js"), "w", encoding="utf-8") as f:
+        f.write(f"window.__BUILD={int(time.time() * 1000)}")
     print(f"Wrote {OUT}  ({os.path.getsize(OUT):,} bytes)")
 
 
+def inject(shell: str, payload) -> str:
+    """The prebuilt page with the ledger in its data tag. Every '<' in the JSON becomes \\u003c (still valid JSON),
+    so no description (bank PDFs, payment emails) can close the script tag or start markup."""
+    if shell.count(MARK) != 1:
+        sys.exit(f"{SHELL} doesn't hold the ledger-data placeholder exactly once; rebuild it with `npm run build` in web/.")
+    data = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
+    return shell.replace(MARK, f'<script id="ledger-data" type="application/json">{data}</script>')
+
+
+def selfcheck():
+    """python build_dashboard.py --selfcheck: hostile text stays inside the data tag and parses back unchanged."""
+    evil = {"tx": [{"desc": "</script><script>alert(1)</script> <!-- ฿"}]}
+    page = inject(f"<html><body>{MARK}<script type=module>app()</script></body></html>", evil)
+    body = page.split('type="application/json">', 1)[1].split("</script>", 1)[0]
+    assert "<" not in body, body
+    assert json.loads(body) == evil
+    assert page.count("<script") == 2, page
+    print("selfcheck ok")
+
+
 if __name__ == "__main__":
-    build()
+    if sys.argv[1:] == ["--selfcheck"]:
+        selfcheck()
+    else:
+        build()

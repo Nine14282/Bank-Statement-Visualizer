@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-time setup (safe to re-run): Python venv + packages, web app packages, settings file.
+# One-time setup (safe to re-run): Python venv + packages, settings file. No Node.js needed: the dashboard page
+# ships prebuilt (web/prebuilt/index.html) and Python fills in your data.
 set -euo pipefail
 cd "$(dirname "$0")"
 umask 077   # files we create (ledger, token, dashboard, settings) are readable by you only
@@ -10,13 +11,10 @@ say() { printf '%s▸%s %s\n' "$B" "$N" "$*"; }
 ok()  { printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1. $2" >&2; exit 1; }; }
-say "Checking for Python 3.10+ and Node.js 20+"
+say "Checking for Python 3.10+"
 need python3 "Install Python 3.10 or newer."
-need node "Install Node.js 20 or newer (https://nodejs.org)."
-need npm "It ships with Node.js."
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || { echo "Python 3.10+ is required." >&2; exit 1; }
-[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ] || { echo "Node.js 20+ is required." >&2; exit 1; }
-ok "$(python3 --version), Node.js $(node --version)"
+ok "$(python3 --version)"
 
 if [ -d .venv ]; then
   ok "Python environment already there (.venv)"
@@ -29,9 +27,6 @@ say "Installing Python packages (pdfplumber, Gmail client, ...): about a minute 
 .venv/bin/python -m pip install --quiet --upgrade pip
 .venv/bin/python -m pip install --quiet -r requirements.txt
 ok "Python packages ready"
-say "Installing web packages for the dashboard (npm install): the slowest step, a few minutes the first time"
-(cd web && npm install --no-audit --no-fund --loglevel=error)
-ok "web packages ready"
 
 say "Preparing folders and your private settings file"
 mkdir -p Statement
@@ -59,7 +54,7 @@ cat <<MSG
 
 Setup done. Next:
   ./run.sh            opens the setup page in your browser: add statements, unlock them, pick a theme
-                      (later runs just rebuild; ./run.sh --setup opens the page again)
+                      (later runs open a short page to add new statements; ./run.sh --setup = full setup)
   ./gmail.sh          auto: download statements from Gmail, then build (see README for the Google setup)
 Dashboard file (blank until you add data): $PWD/web/dist/index.html
 Updating from an older version? Run ./run.sh once so the ledger gets the new Bank column.
