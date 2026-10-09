@@ -3,19 +3,19 @@
 
 Drop a new statement PDF into Statement/ and run this single script. It:
   1. reads every PDF in Statement/ (unlocking encrypted ones),
-  2. merges them, dropping duplicates — a transaction is unique by
-     (date-time, amount, balance) since the running balance never repeats,
+  2. merges them, dropping duplicates — a transaction is unique by its ID
+     (txid.py: minute + signed amount + occurrence within one statement),
   3. writes the combined ledger.csv, and
   4. rebuilds the local, self-contained dashboard (web/dist/index.html).
 
 Everything stays on your machine; nothing is uploaded. Open the resulting
 web/dist/index.html in any browser (works offline).
 
-Encrypted PDFs are unlocked on the fly. KTB and KBank use different passwords: KTB_PW and
-KBANK_PW. KBank files are named STM_... (Gmail downloads add an 8-character message-id prefix),
-so each file tries its own bank's password first, then the other, then --password= / a typed
-one, then an interactive prompt (asked
-once and reused for every encrypted file).
+Encrypted PDFs are unlocked on the fly. Each bank has its own password setting (BANKS in
+extract_ledger.py: KTB_PW, KBANK_PW). Each file tries no password, then its own bank's setting (by
+file name; KBank files are named STM_..., Gmail downloads add an 8-character message-id prefix),
+then every other bank's, then --password= / ones typed this run, then an interactive prompt
+(asked once and reused for every encrypted file).
 
 Usage:
     python update_statement.py [STATEMENT_DIR] [OUTPUT_CSV]

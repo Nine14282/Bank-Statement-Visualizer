@@ -14,13 +14,13 @@ read-only Gmail download.
 
 ## Quick start
 
-Needs Python 3.10+, Node.js 20+ and npm.
+Needs Python 3.10+. Nothing else: the dashboard page ships prebuilt, so you don't need Node.js or npm.
 
 ```bash
 ./run.sh
 ```
 
-The first run installs everything (`./setup.sh`: `.venv`, Python and web packages, a private `.env`
+The first run installs everything (`./setup.sh`: `.venv`, Python packages, a private `.env`
 from `.env.example`) and opens a **setup page** in your browser. One screen per step, **Next** to go on:
 
 1. **Welcome.**
@@ -35,14 +35,19 @@ from `.env.example`) and opens a **setup page** in your browser. One screen per 
 6. **Gmail tips** for automatic downloads, then **Build my dashboard**: the ledger is built and the
    dashboard opens; the setup page's little local server stops.
 
-After that, `./run.sh` just rebuilds from `Statement/` (no setup page). `./run.sh --setup` opens the
-setup page again, for example to add a statement or change the theme. Re-running `./setup.sh` is safe.
+After that, `./run.sh` opens a short **Add statements** page instead (below). `./run.sh --setup` opens
+the full setup page again, for example to change the theme. Re-running `./setup.sh` is safe.
 
 ## Option 1: add statements yourself
 
-1. Put your statement PDFs in `Statement/` (or add them on the setup page: `./run.sh --setup`).
-2. Run `./run.sh`.
-3. Open `web/dist/index.html` in a browser.
+1. Run `./run.sh`. A page opens in your browser:
+   - **Statements**: drop in the new PDFs your bank sent (they are copied into `Statement/`).
+   - **Passwords**: only if a file needs one you haven't saved; tick *Remember* to never be asked again.
+   - **Update my dashboard**: everything in `Statement/` is read again and the dashboard opens.
+2. That's it. An open dashboard tab reloads by itself after the rebuild.
+
+No browser (a server over SSH, or you just copied files into `Statement/` by hand)? `./run.sh --rebuild`
+rebuilds in the terminal. Runs with nobody at the terminal (cron) do that automatically.
 
 **PDF password** (bank PDFs are usually encrypted). KTB and KBank use different passwords:
 `KTB_PW` and `KBANK_PW`. KBank files are the ones named `STM_...`; each file tries its own bank's
@@ -50,12 +55,12 @@ password first. Pick one:
 
 | How | When |
 |---|---|
-| Do nothing | `./run.sh` asks (typed, hidden) the first time a file needs it |
-| Tick *Remember* on the setup page | saved in `.env` for you, never asked again |
+| Do nothing | the page (or `./run.sh --rebuild`, typed and hidden) asks the first time a file needs it |
+| Tick *Remember* on the page | saved in `.env` for you, never asked again |
 | `KTB_PW=...` and `KBANK_PW=...` in `.env` | never asked again |
-| `./run.sh --password=yourpassword` | one-off, but it stays in shell history and shows in `ps` to other users of the machine |
+| `./run.sh --password=yourpassword` | one-off terminal rebuild, but it stays in shell history and shows in `ps` to other users of the machine |
 
-Run it again whenever you add a new PDF. Duplicates are dropped automatically, so overlapping
+Run it again whenever you get a new PDF. Duplicates are dropped automatically, so overlapping
 statements are fine.
 
 ## Option 2: fetch from Gmail automatically
@@ -101,7 +106,7 @@ Notes:
 
 | Setting | Effect |
 |---|---|
-| `ACCOUNT_LABEL`, `ACCOUNT_HOLDER` | text shown in the dashboard sidebar |
+| `ACCOUNT_LABEL`, `ACCOUNT_HOLDER` | account label and your name: the avatar (initials + tooltip) and greeting in the dashboard top bar |
 | `THEME` | the dashboard's default theme (`midnight` or `daylight`); the setup page sets it |
 | `LEDGER_CASH_REF` | account number in the transaction detail for *your own cash channel* → "Cash withdrawal / Cash deposit" |
 | `LEDGER_PEER_REF` | a person you lend to → "Lent out / Loan repaid to me" |
@@ -128,9 +133,10 @@ commit the code. The dashboard file contains your transactions: share it only on
 ## Troubleshooting
 
 - **"Not set up yet"** → run `./setup.sh`.
-- **"No PDFs in Statement/"** → add them with `./run.sh --setup`, or copy them there first.
-- **The setup page didn't open** → open the `http://127.0.0.1:…/?setup=…` link that `./run.sh` printed.
-  It only works while `./run.sh` is running (Ctrl+C there stops it).
+- **"No PDFs in Statement/"** → add them on the page `./run.sh` opens, or copy them there first.
+- **The page didn't open** → open the `http://127.0.0.1:…/?setup=…` link that `./run.sh` printed.
+  It only works while `./run.sh` is running (Ctrl+C there stops it). No browser on this machine: use
+  `./run.sh --rebuild`.
 - **"Data may be missing" on the dashboard** → a statement for that period isn't in `Statement/`
   (or the balance doesn't add up across a gap). Add it and run again.
 - **Wrong password** → you are asked for that file's password; unattended runs stop without touching
@@ -138,7 +144,8 @@ commit the code. The dashboard file contains your transactions: share it only on
 - **A PDF isn't read / amounts look wrong** → only Krungthai's and KBank's layouts are supported. Every
   row is still imported; a row that doesn't agree with the statement's own balances or totals is printed as
   `CHECK <file>: …` (the statement is right, so that row was misread). Send that line along when reporting it.
-- **`npm not found`** → install Node.js 20+, then `./setup.sh`.
+- **"Missing web/prebuilt/index.html"** → that file ships with the project; restore it with
+  `git checkout web/prebuilt` (or download the project again).
 
 ## Security notes
 
@@ -147,11 +154,12 @@ commit the code. The dashboard file contains your transactions: share it only on
 - `.env`, `workspace/token.json`, your PDFs, `ledger.csv` and the dashboard are created readable by
   you only and are git-ignored. The dashboard file contains all your transactions: don't share it.
 - Statement PDFs are parsed locally. Only run this on statements from your own bank.
-- Secrets from `.env` are not passed on to `npm` when the dashboard is built.
-- The setup page talks to a small server that `./run.sh` starts only for setup: it listens on
-  127.0.0.1 (this computer only) on a random port, answers only requests carrying the random token in
-  the printed link, and stops when setup finishes. Passwords stay in its memory unless you tick
-  *Remember*.
+- Building the dashboard runs no third-party JavaScript tooling: Python copies the prebuilt page and writes
+  your data into it.
+- The setup and Add statements pages talk to a small server that `./run.sh` starts only while the page
+  is in use: it listens on 127.0.0.1 (this computer only) on a random port, answers only requests carrying
+  the random token in the printed link, and stops when you finish. Passwords stay in its memory unless you
+  tick *Remember*.
 
 ## Adding a bank
 
@@ -160,3 +168,16 @@ setting, file-name pattern, text that identifies its PDFs, parser). The setup pa
 build all read that list. Showing it: one entry in `web/src/lib/banks.ts` (name, card colour, logo).
 Themes work the same way: one entry in `web/src/lib/themes.ts`, plus a `[data-theme="…"]` block in
 `web/src/index.css` for colours beyond the light/dark base.
+
+## Changing the dashboard (developers)
+
+Only needed if you edit `web/src/`. Needs Node.js 20+.
+
+```bash
+cd web && npm install
+npm run dev      # live preview with your own data (from the last ./run.sh)
+npm run build    # rebuilds web/prebuilt/index.html: the page without data that everyone's build uses
+```
+
+Commit `web/prebuilt/index.html` with your source change, or users keep the old page. The build never
+contains data (the ledger is written into the page by `workspace/build_dashboard.py`), so it is safe to commit.
