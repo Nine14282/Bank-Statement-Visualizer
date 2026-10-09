@@ -6,13 +6,15 @@ Columns: Date, Description, Category, Amount, Balance, ID, Bank
   - KTB: withdrawal vs deposit is decided by the amount's x-position under the
     statement's own column headers, not by guessing.
   - KBank: decided by the balance change, cross-checked against the x-position and
-    the statement's own totals (a mismatch rejects the file).
+    the statement's own totals.
+  - A row that doesn't reconcile prints a CHECK line and is still imported, never dropped.
 
 Usage:
     python extract_ledger.py [INPUT_PDF] [OUTPUT_CSV]
     python extract_ledger.py IN.pdf OUT.csv --password=...
-The password comes from --password=, else KBANK_PW for STM_* files / KTB_PW for others (see
-.env.example), else it is asked for (typed, hidden).
+The password comes from --password=, else the password setting of the bank the file name points to
+(BANKS below: KBANK_PW for STM_* files, KTB_PW for others; see .env.example), else it is asked for
+(typed, hidden).
 Defaults: statement_clean.pdf -> ledger.csv
 """
 import csv
@@ -385,10 +387,6 @@ def bank_from_name(path: str) -> Bank | None:
 
 def bank_from_text(text: str) -> Bank | None:
     return next((b for b in BANKS if any(m in text for m in b.markers)), None)
-
-
-def is_kbank(path: str) -> bool:
-    return bank_from_name(path) is BY_ID["KBANK"]
 
 
 def password_for(path: str) -> str | None:

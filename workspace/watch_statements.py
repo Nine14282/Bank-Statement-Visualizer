@@ -20,6 +20,7 @@ import sys
 import time
 
 import update_statement
+from extract_ledger import BANKS
 
 # Anchor default watch folder to the project root (outside workspace/).
 HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
@@ -58,10 +59,12 @@ def main():
         print(f"No such folder: {folder}", file=sys.stderr)
         return 1
 
-    # Resolve the password up front so unattended runs never block on a prompt.
-    if not (os.environ.get("KTB_PW") or os.environ.get("STATEMENT_PW")):
-        os.environ["KTB_PW"] = getpass.getpass(
-            "KTB statement password (leave blank if PDFs are already unlocked): ")
+    # Resolve a password up front so unattended runs never block on a prompt. Every file tries every
+    # bank's setting and the typed ones (update_statement.candidates), so one typed here covers any bank.
+    if not any(os.environ.get(k) for b in BANKS for k in b.passwords):
+        pw = getpass.getpass("Statement password (leave blank if PDFs are already unlocked): ")
+        if pw:
+            update_statement.passwords().append(pw)
 
     print(f"Watching {folder}/ for new statements — Ctrl-C to stop.")
     prev = snapshot(folder)
