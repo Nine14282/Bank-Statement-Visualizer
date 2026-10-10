@@ -8,6 +8,8 @@ Every script imports this first; see .env.example for the settings.
 """
 import os
 
+os.umask(0o077)   # ledger, dashboard and cache are private even when a script is run by hand
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENVFILE = os.path.join(ROOT, ".env")
 
@@ -20,7 +22,9 @@ def load_env() -> None:
         if not line or line.startswith("#"):
             continue
         key, sep, value = line.removeprefix("export ").partition("=")
-        value = value.strip().strip("\"'")
+        value = value.strip()
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":   # one matching pair, so a quoted
+            value = value[1:-1]                                              # GMAIL_QUERY keeps its inner quotes
         if sep and value:
             os.environ.setdefault(key.strip(), value)
 

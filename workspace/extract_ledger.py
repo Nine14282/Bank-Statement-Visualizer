@@ -10,12 +10,11 @@ Columns: Date, Description, Category, Amount, Balance, ID, Bank
   - A row that doesn't reconcile prints a CHECK line and is still imported, never dropped.
 
 Usage:
-    python extract_ledger.py [INPUT_PDF] [OUTPUT_CSV]
+    python extract_ledger.py IN.pdf OUT.csv
     python extract_ledger.py IN.pdf OUT.csv --password=...
 The password comes from --password=, else the password setting of the bank the file name points to
 (BANKS below: KBANK_PW for STM_* files, KTB_PW for others; see .env.example), else it is asked for
 (typed, hidden).
-Defaults: statement_clean.pdf -> ledger.csv
 """
 import csv
 import getpass
@@ -27,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import pdfplumber
+from pdfplumber.utils.exceptions import PdfminerException
 
 import config  # loads the project's env settings into os.environ
 from txid import stamp_ids
@@ -443,39 +443,26 @@ def main() -> int:
         selfcheck()
         return 0
     args = [a for a in sys.argv[1:] if not a.startswith("--password=")]
-    src = args[0] if len(args) > 0 else "statement_clean.pdf"
-    dst = args[1] if len(args) > 1 else "ledger.csv"
+    if len(args) != 2:
+        print("Usage: extract_ledger.py IN.pdf OUT.csv [--password=...]   (or --selfcheck)", file=sys.stderr)
+        return 2
+    src, dst = args
 
     # --password= wins, then the settings password for this file's bank, then ask.
     typed = [a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--password=")]
     pw = typed[0] if typed else password_for(src)
     try:
-        bank_of(src, pw)
-    except Exception:           # wrong/missing password (the error type varies by PDF): ask, if someone can answer
+        bank = bank_of(src, pw)
+    except PdfminerException:   # wrong or missing password (pdfplumber wraps every open failure in this): ask, if someone can
         if not sys.stdin.isatty():
             raise
         named = bank_from_name(src)
         pw = getpass.getpass(f"{named.name if named else 'PDF'} password for {os.path.basename(src)}: ")
-    bank = bank_of(src, pw)
-    if bank.id != "KTB":
-        rows = bank.parse(src, pw)     # prints a CHECK line for anything that doesn't reconcile
-        stamp_ids(rows)
-        write_csv(rows, dst)
-        print(f"Wrote {len(rows)} {bank.name} transactions to {dst}")
-        return 0
-    records, totals = parse(src, pw)
-    rows, stats = build_rows(records)
-    report(os.path.basename(src), check_totals(stats, totals))
+        bank = bank_of(src, pw)
+    rows = bank.parse(src, pw)     # prints a CHECK line for anything that doesn't reconcile
     stamp_ids(rows)
     write_csv(rows, dst)
-
-    print(f"Wrote {len(rows)} transactions to {dst}")
-    print(f"  Withdrawals: {stats['wd_n']} rows, total {stats['wd_sum']:,.2f}")
-    print(f"  Deposits:    {stats['dep_n']} rows, total {stats['dep_sum']:,.2f}")
-    if stats["warnings"]:
-        print(f"  WARNINGS ({len(stats['warnings'])}):")
-        for w in stats["warnings"][:10]:
-            print("   ", w)
+    print(f"Wrote {len(rows)} {bank.name} transactions to {dst}")
     return 0
 
 

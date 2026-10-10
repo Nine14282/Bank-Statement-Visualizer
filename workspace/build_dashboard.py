@@ -10,8 +10,10 @@ Usage: python build_dashboard.py      (python build_dashboard.py --selfcheck: th
 """
 import csv
 import datetime
+import itertools
 import json
 import os
+import re
 import sys
 import time
 
@@ -26,6 +28,7 @@ WEB = os.path.join(ROOT, "web")
 SHELL = os.path.join(WEB, "prebuilt", "index.html")   # the app without data: `npm run build` in web/ makes it
 JSON_OUT = os.path.join(WEB, "src", "data", "ledger.json")   # for the dev server only
 OUT = os.path.join(WEB, "dist", "index.html")      # the dashboard
+LINK = os.path.join(ROOT, "Dashboard.html")         # one double-click from the project folder; forwards to OUT
 # The placeholder in web/index.html (and so in the prebuilt page) that the data replaces; same text in vite.config.ts.
 MARK = '<script id="ledger-data" type="application/json">null</script>'
 
@@ -64,8 +67,8 @@ def find_gaps(tx):
     for bank in sorted({t["bank"] for t in tx}):   # each account has its own balance chain
         cur, cur_date = None, None
         bal_rows = [t for t in tx if t["bal"] is not None and t["bank"] == bank]   # manual rows carry no balance
-        for minute in sorted({t["date"] for t in bal_rows}):
-            rem = [t for t in bal_rows if t["date"] == minute]
+        for minute, grp in itertools.groupby(sorted(bal_rows, key=lambda t: t["date"]), key=lambda t: t["date"]):
+            rem = list(grp)
             while rem:
                 nxt = next((t for t in rem
                             if cur is None or abs(cur + t["amt"] - t["bal"]) < 0.011), None)
@@ -143,7 +146,12 @@ def build(csv_path: str = CSV) -> None:
     # when the number changes.
     with open(os.path.join(os.path.dirname(OUT), "version.js"), "w", encoding="utf-8") as f:
         f.write(f"window.__BUILD={int(time.time() * 1000)}")
-    print(f"Wrote {OUT}  ({os.path.getsize(OUT):,} bytes)")
+    # ponytail: a forwarder, not a copy: the page stays at OUT, so its version.js polling and saved browser
+    # settings (localStorage) keep working. No data in it.
+    with open(LINK, "w", encoding="utf-8") as f:
+        f.write('<!doctype html><meta charset="utf-8"><title>Statement Visualizer</title>'
+                '<script>location.replace("web/dist/index.html")</script>\n')
+    print(f"Wrote {OUT}  ({os.path.getsize(OUT):,} bytes); open it with {LINK}")
 
 
 def inject(shell: str, payload) -> str:
@@ -152,6 +160,9 @@ def inject(shell: str, payload) -> str:
     if shell.count(MARK) != 1:
         sys.exit(f"{SHELL} doesn't hold the ledger-data placeholder exactly once; rebuild it with `npm run build` in web/.")
     data = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
+    theme = payload.get("meta", {}).get("theme") or ""
+    if re.fullmatch(r"[a-z0-9-]{1,30}", theme):   # the first frame's background (index.html) follows the theme
+        shell = shell.replace('<html lang="en">', f'<html lang="en" data-theme="{theme}">', 1)
     return shell.replace(MARK, f'<script id="ledger-data" type="application/json">{data}</script>')
 
 

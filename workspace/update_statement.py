@@ -22,12 +22,19 @@ Usage:
     KTB_PW=xxxx KBANK_PW=yyyy python update_statement.py
 Defaults: Statement/ -> ledger.csv -> web/dist/index.html
 """
+import contextlib
 import csv
 import getpass
 import glob
+import hashlib
+import io
+import json
 import os
 import sys
 from datetime import datetime, timedelta
+
+import pdfplumber
+from pdfplumber.utils.exceptions import PdfminerException
 
 import build_dashboard
 import config  # loads the project's env settings (KTB_PW, KBANK_PW, ...) into os.environ
@@ -37,6 +44,14 @@ from txid import differences, stamp_ids
 # Anchor paths to this script's folder so it runs from any working directory.
 HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
 ROOT = os.path.dirname(HERE)                         # project root
+
+# Parsed rows per PDF, so an update only reads statements it hasn't read before (re-reading all 9 took ~40 s). An entry
+# is keyed by the file's bytes plus everything else that shapes its rows: the parser code, the pdfplumber version and
+# the reference-number settings categorize() reads; change any and the file is read again. It holds transactions like
+# ledger.csv: private (0600), git-ignored, deleted by clear.sh; entries no PDF uses any more go after each good run.
+CACHE = os.path.join(HERE, ".cache")
+USED: set[str] = set()      # entries this run used (the rest are pruned)
+CACHE_SETTINGS = ("LEDGER_CASH_REF", "LEDGER_PEER_REF", "LEDGER_STOCK_REF")
 
 
 def passwords(cache=[]):
@@ -64,26 +79,88 @@ def why(e):
     return type(e).__name__ + (f": {', '.join(inner)}" if inner else "")
 
 
+def cache_entry(path) -> str:
+    parts = [open(path, "rb").read(), open(os.path.join(HERE, "extract_ledger.py"), "rb").read(),
+             pdfplumber.__version__.encode(), *(os.environ.get(k, "").encode() for k in CACHE_SETTINGS)]
+    key = hashlib.sha256(b"".join(hashlib.sha256(p).digest() for p in parts)).hexdigest()[:40]
+    USED.add(key)
+    return os.path.join(CACHE, key + ".json")
+
+
+def remember(path, rows, log=""):
+    """Cache one PDF's rows and what reading it printed (its CHECK lines, shown again on every run)."""
+    os.makedirs(CACHE, mode=0o700, exist_ok=True)
+    fd = os.open(cache_entry(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"rows": rows, "log": log}, f, ensure_ascii=False)
+
+
+def cached(path):
+    """This PDF's cached rows, or None if it hasn't been read yet (quiet, needs no password)."""
+    try:
+        with open(cache_entry(path), encoding="utf-8") as f:
+            return json.load(f)["rows"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def load(path):
+    """Rows of one PDF: from the cache if this exact file was read before (same parser, same settings; no password
+    needed then), else read and cached."""
+    try:
+        with open(cache_entry(path), encoding="utf-8") as f:
+            hit = json.load(f)
+        print(hit["log"], end="")
+        return hit["rows"]
+    except (OSError, ValueError, KeyError):
+        pass                       # not read before (or an unreadable entry): read the PDF
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rows = read_pdf(path)
+    print(buf.getvalue(), end="")
+    remember(path, rows, buf.getvalue())
+    return rows
+
+
+def prune_cache():
+    """Drop entries no PDF used this run (a deleted statement, an older parser or setting)."""
+    for name in os.listdir(CACHE) if os.path.isdir(CACHE) else []:
+        if name.endswith(".json") and name[:-5] not in USED:
+            os.remove(os.path.join(CACHE, name))
+
+
+def read_pdf(path):
     """Extract rows from a PDF: no password, then each known password, then ask (if someone can answer)."""
     errors = []
     for pw in candidates(path):
         try:
             return extract(path, pw)
-        except ValueError:
-            raise                  # it opened, but the rows don't add up (KBank totals check): report, don't retry
-        except Exception as e:     # wrong password, or an encrypted file tried without one (the error type varies
-            errors.append(e)       # by PDF: KBank says PDFPasswordIncorrect, others raise other pdfminer errors)
+        except PdfminerException as e:   # pdfplumber wraps every open/decrypt failure in this: wrong or missing
+            errors.append(e)             # password. Anything else is a parser problem: let it reach main()'s SKIP
     if not sys.stdin.isatty():      # cron / watcher: nobody to ask. Stop rather than write a ledger missing this file.
         keys = " / ".join(b.passwords[0] for b in BANKS)
         sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
                  "in the env settings (see .env.example), run ./run.sh --setup, or run this by hand to type it. "
                  "Ledger left unchanged.")
     named = bank_from_name(path)
-    pw = getpass.getpass(f"{named.name if named else 'PDF'} password for {os.path.basename(path)}: ")
-    rows = extract(path, pw)
-    passwords().append(pw)          # reuse for the next file
-    return rows
+    last = None
+    for _ in range(3):
+        pw = getpass.getpass(f"{named.name if named else 'PDF'} password for {os.path.basename(path)}: ")
+        try:
+            rows = extract(path, pw)
+        except PdfminerException as e:
+            last = e
+            print(f"  that password doesn't open it ({why(e)})")
+            continue
+        passwords().append(pw)      # reuse for the next file
+        return rows
+    raise last
+
+
+def by_minute(r):
+    """Sort key. Date only: a stable sort keeps rows of one minute in statement order, which is the order their
+    balances chain (sorting Balance as text put "70.00" after "160.00" and the dashboard read the wrong last row)."""
+    return r["Date"]
 
 
 def own_transfers(rows):
@@ -108,7 +185,11 @@ def own_transfers(rows):
             print(f"  own transfer: {a['Date']} {a['Bank']} -> {b['Bank']} {-float(a['Amount']):,.2f}")
 
 
-def main() -> int:
+def main(progress=None) -> int:
+    """progress(stage, done=0, total=0), if given, hears each stage as it starts ("read" per file, "merge",
+    "build"): the add page's loader shows it."""
+    step = progress or (lambda *a: None)
+    USED.clear()                # a long-running process (the app) calls main() again: prune from this run only
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     src_dir = args[0] if len(args) > 0 else os.path.join(ROOT, "Statement")
     dst = args[1] if len(args) > 1 else os.path.join(HERE, "ledger.csv")
@@ -120,8 +201,9 @@ def main() -> int:
 
     by_id, merged, skipped, conflicts = {}, [], [], []
     reworded = 0
-    for path in pdfs:
+    for i, path in enumerate(pdfs, 1):
         name = os.path.basename(path)
+        step("read", i, len(pdfs))
         try:
             rows = load(path)
         except Exception as e:
@@ -151,10 +233,22 @@ def main() -> int:
     if reworded:
         print(f"  {reworded} row(s) took the newer statement's wording for the same transaction")
 
+    step("merge")
     # Hand-entered rows (spends no bank record covers) live in manual_entries.csv.
     manual = os.path.join(HERE, "manual_entries.csv")
     if os.path.exists(manual):
-        extra = list(csv.DictReader(open(manual, encoding="utf-8-sig")))
+        with open(manual, newline="", encoding="utf-8-sig") as f:
+            typed = list(csv.DictReader(f))
+        extra = []
+        for n, r in enumerate(typed, 2):     # line 1 is the header
+            try:
+                datetime.fromisoformat(r["Date"])
+                float(r["Amount"])
+            except (KeyError, TypeError, ValueError):
+                print(f"  manual_entries.csv line {n} skipped: needs a Date like 2026-01-31 or 2026-01-31 14:05 "
+                      "and a numeric Amount")
+                continue
+            extra.append(r)
         for r in extra:   # payment emails come from Krungthai NEXT; anything else was typed by hand
             r["Bank"] = "KTB" if "(email)" in r["Description"] else "Manual"
         extra = stamp_ids(extra)
@@ -206,8 +300,9 @@ def main() -> int:
     assert len({r["ID"] for r in merged}) == len(merged), "duplicate transaction IDs after merge"
 
     own_transfers(merged)
-    merged.sort(key=lambda r: (r["Date"], r["Balance"]))
+    merged.sort(key=by_minute)
     write_csv(merged, dst)
+    prune_cache()
 
     print(f"\nMerged {len(pdfs) - len(skipped)} statement(s) -> {dst}")
     print(f"  {len(merged)} unique transactions")
@@ -218,10 +313,63 @@ def main() -> int:
 
     # Rebuild the local dashboard from the freshly merged ledger.
     print()
+    step("build")
     build_dashboard.build(csv_path=dst)
-    print("\nDone. Open web/dist/index.html in your browser.")
+    print("\nDone. Open Dashboard.html (project folder) in your browser.")
     return 0
 
 
+def selfcheck():
+    """python update_statement.py --selfcheck: a PDF is read once, then served from the cache (CHECK lines included)
+    until the file or a setting changes; pruning keeps only what the run used."""
+    import tempfile
+    global CACHE, read_pdf
+    real_cache, real_read, reads = CACHE, read_pdf, []
+
+    def fake_read(path):
+        reads.append(path)
+        print("CHECK a.pdf: one row doesn't reconcile")
+        return [{"Date": "2026-01-01 10:00", "Description": "x", "Category": "Food", "Amount": "-1.00", "Balance": "9.00"}]
+
+    def quiet_load(path):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            return load(path), buf.getvalue()
+
+    same_minute = [{"Date": "2026-01-01 10:00", "Balance": b} for b in ("150.00", "140.00", "130.00")]
+    assert [r["Balance"] for r in sorted(same_minute, key=by_minute)] == ["150.00", "140.00", "130.00"]
+
+    saved = os.environ.get(CACHE_SETTINGS[0])
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            CACHE, read_pdf = os.path.join(d, "cache"), fake_read
+            pdf = os.path.join(d, "a.pdf")
+            open(pdf, "wb").write(b"%PDF-1 first")
+            (rows, log), (again, log2) = quiet_load(pdf), quiet_load(pdf)
+            assert rows == again and len(reads) == 1, reads                 # second load: the cache, no read
+            assert "CHECK" in log and log2 == log, (log, log2)             # the warning shows on every run
+            os.environ[CACHE_SETTINGS[0]] = "changed"
+            quiet_load(pdf)
+            assert len(reads) == 2, reads                                   # a setting changed: read again
+            open(pdf, "wb").write(b"%PDF-1 second")
+            quiet_load(pdf)
+            assert len(reads) == 3, reads                                   # the file changed: read again
+            USED.clear()
+            quiet_load(pdf)
+            prune_cache()
+            assert len(os.listdir(CACHE)) == 1, os.listdir(CACHE)           # older entries pruned
+            assert oct(os.stat(os.path.join(CACHE, os.listdir(CACHE)[0])).st_mode & 0o777) == "0o600"
+    finally:
+        CACHE, read_pdf = real_cache, real_read
+        if saved is None:
+            os.environ.pop(CACHE_SETTINGS[0], None)
+        else:
+            os.environ[CACHE_SETTINGS[0]] = saved
+    print("selfcheck ok")
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--selfcheck"]:
+        selfcheck()
+        raise SystemExit(0)
     raise SystemExit(main())
