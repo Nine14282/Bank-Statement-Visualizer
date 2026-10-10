@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Setup wizard and "add statements" page. ./run.sh starts the full setup on the first run (no ledger yet) or
-with --setup, and the short add page (--add: statements, passwords, update) on every later run.
+with --setup, and the short add page (--add: statements, passwords, update) on every later run. The app window
+(app.py) shows the same add page and calls handle() below directly, without this server.
 
 A small local server serves the dashboard page with ?setup (plus &add in add mode), which shows the wizard
 instead of the dashboard (web/src/components/setup/wizard.tsx), and answers its API calls:
@@ -12,6 +13,7 @@ instead of the dashboard (web/src/components/setup/wizard.tsx), and answers its 
   POST /api/password         {bank, password, remember}: opens and parses that bank's locked files with it
   POST /api/finish           {theme, plan}: save the choices (each only if sent), build the ledger + dashboard,
                              open it, stop
+  GET  /api/progress         what the build is doing ({stage, done, total}), polled by the page while it runs
 
 Only this computer can reach it (127.0.0.1, random port). The printed link carries a random one-time token: the
 first visit swaps it for an HttpOnly, SameSite=Strict cookie and redirects to a clean URL, so a copy of the link
@@ -60,6 +62,8 @@ TOKEN_USED = threading.Event()
 MAX_PDF = 30 * 1024 * 1024
 FILES: dict[str, dict] = {}     # file name in Statement/ -> {bank, locked, ok, uploaded}
 LOCK = threading.Lock()
+# What finish() is doing, for the page's loader (/api/progress). Read without LOCK: finish() holds it while it runs.
+PROGRESS = {"stage": "", "done": 0, "total": 0}
 # Banks whose password is in the settings file: at start, plus any saved with "remember". A password used for
 # this run only also sits in os.environ (for the build), so os.environ alone can't tell them apart.
 SAVED = {b.id for b in BANKS if any(os.environ.get(k) for k in b.passwords)}
@@ -68,6 +72,9 @@ SAVED = {b.id for b in BANKS if any(os.environ.get(k) for k in b.passwords)}
 def detect(path: str) -> dict:
     """Bank and lock state of one PDF: opened with no password or a saved one if possible (then its page-1
     text names the bank), else the file name; None = ask the user."""
+    rows = update_statement.cached(path)
+    if rows is not None:               # read before (workspace/.cache): no need to open it, and no password needed
+        return {"bank": rows[0].get("Bank") if rows else None, "locked": False, "ok": True}
     for pw in candidates(path):
         try:
             with pdfplumber.open(path, password=pw) as pdf:
@@ -80,11 +87,14 @@ def detect(path: str) -> dict:
     return {"bank": b.id if b else None, "locked": True, "ok": False}
 
 
-def scan() -> None:
+def scan(quiet: bool = False) -> None:
+    """Pick up PDFs that appeared in Statement/ (already known names are skipped, so this is cheap to repeat)."""
     os.makedirs(STATEMENTS, exist_ok=True)
     for name in sorted(os.listdir(STATEMENTS)):
         if name.lower().endswith(".pdf") and name not in FILES:
             FILES[name] = {**detect(os.path.join(STATEMENTS, name)), "uploaded": False}
+    if quiet:
+        return
     locked = sum(not f["ok"] for f in FILES.values())
     note(f"{len(FILES)} PDF(s) already there" + (f", {locked} need a password" if locked else "") if FILES else "none yet")
 
@@ -118,7 +128,8 @@ def upload(raw_name: str, data: bytes) -> dict:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
-    FILES[name] = {**detect(path), "uploaded": True}
+    # Re-adding an identical file that was already in Statement/ must not make it removable from the page.
+    FILES[name] = {**detect(path), "uploaded": FILES.get(name, {}).get("uploaded", True)}
     bank = BY_ID[FILES[name]["bank"]].name if FILES[name]["bank"] else "bank not recognised yet"
     note(f"added {name} ({bank})")
     return {"name": name, **FILES[name]}
@@ -133,10 +144,15 @@ def unlock(bank: str, password: str, remember: bool) -> dict:
         return {"ok": True, "files": 0, "rows": 0}
     bad, rows = [], 0
     for n in names:
+        path, buf = os.path.join(STATEMENTS, n), io.StringIO()
         try:
-            rows += len(extract(os.path.join(STATEMENTS, n), password))
+            with contextlib.redirect_stdout(buf):
+                got = extract(path, password)
         except Exception:
             bad.append(n)
+            continue
+        update_statement.remember(path, got, buf.getvalue())   # the update then takes it from the cache: one read
+        rows += len(got)
     if bad:
         note(f"{BY_ID[bank].name}: that password didn't open {len(bad)} file(s)")
         return {"ok": False, "bad": bad}
@@ -178,22 +194,58 @@ def finish(server, theme: str, plan) -> dict:
             json.dump(clean_plan(plan), f, ensure_ascii=False)
         say(f"Saved your choices (theme: {theme or 'default'}, {len(clean_plan(plan))} expected-spending item(s))")
     say("Reading your statements and building the ledger and dashboard…")
+    PROGRESS.update(stage="start", done=0, total=0)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         try:
-            code = update_statement.main()
+            code = update_statement.main(progress=lambda stage, done=0, total=0:
+                                         PROGRESS.update(stage=stage, done=done, total=total))
         except SystemExit as e:        # e.g. a file no known password opens
             print(e)
             code = 1
+    PROGRESS.update(stage="failed" if code else "done")
     log = buf.getvalue()
     sys.stdout.write(log)
     if code:
         say("The build stopped; the page shows why. Fix it there and press Try again.")
         return {"ok": False, "log": log[-3000:]}
+    if server is None:                 # the app window (app.py) goes back to the dashboard itself
+        for f in FILES.values():       # its next add page lists only files added after this update
+            f["uploaded"] = False
+        say("Done. The dashboard is rebuilt.")
+        return {"ok": True, "dashboard": OUT, "log": log[-1500:]}
     say(f"Done. Opening your dashboard: {OUT}")
     # Done: open the dashboard (a file on disk, which a web page can't link to) and stop the server.
     threading.Timer(0.8, lambda: (webbrowser.open(Path(OUT).as_uri()), server.shutdown())).start()
     return {"ok": True, "dashboard": OUT, "log": log[-1500:]}
+
+
+def handle(path: str, name: str, body: bytes, server=None) -> dict | None:
+    """One call from the setup/add page: over HTTP (Handler below) or straight from the app window (app.py).
+    Bad input raises ValueError, which the page shows; an unknown path returns None. Call it holding LOCK."""
+    if path == "/api/state":
+        return state()
+    if path == "/api/upload":
+        return upload(name, body)
+    data = json.loads(body or b"{}")
+    if path == "/api/remove":
+        name = str(data.get("name", ""))
+        if not FILES.get(name, {}).get("uploaded"):
+            raise ValueError("Only files added in this setup can be removed here.")
+        os.remove(os.path.join(STATEMENTS, name))
+        del FILES[name]
+        return {"ok": True}
+    if path == "/api/bank":
+        name, bank = str(data.get("name", "")), str(data.get("bank", ""))
+        if name not in FILES or bank not in BY_ID:
+            raise ValueError("Unknown file or bank.")
+        FILES[name]["bank"] = bank
+        return {"ok": True}
+    if path == "/api/password":
+        return unlock(str(data.get("bank", "")), str(data.get("password", "")), bool(data.get("remember")))
+    if path == "/api/finish":
+        return finish(server, str(data.get("theme", "")), data.get("plan"))
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -253,6 +305,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/state" and self.api_ok():
             with LOCK:
                 return self.json(state())
+        if url.path == "/api/progress" and self.api_ok():
+            return self.json(dict(PROGRESS))   # no LOCK: finish() holds it while the build runs
         self.send(404, b"not found", "text/plain")
 
     def do_POST(self):
@@ -267,30 +321,12 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(size)
         try:
             with LOCK:
-                if url.path == "/api/upload":
-                    return self.json(upload(parse_qs(url.query).get("name", ["statement.pdf"])[0], body))
-                data = json.loads(body or b"{}")
-                if url.path == "/api/remove":
-                    name = str(data.get("name", ""))
-                    if not FILES.get(name, {}).get("uploaded"):
-                        raise ValueError("Only files added in this setup can be removed here.")
-                    os.remove(os.path.join(STATEMENTS, name))
-                    del FILES[name]
-                    return self.json({"ok": True})
-                if url.path == "/api/bank":
-                    name, bank = str(data.get("name", "")), str(data.get("bank", ""))
-                    if name not in FILES or bank not in BY_ID:
-                        raise ValueError("Unknown file or bank.")
-                    FILES[name]["bank"] = bank
-                    return self.json({"ok": True})
-                if url.path == "/api/password":
-                    return self.json(unlock(str(data.get("bank", "")), str(data.get("password", "")),
-                                            bool(data.get("remember"))))
-                if url.path == "/api/finish":
-                    return self.json(finish(self.server, str(data.get("theme", "")), data.get("plan")))
+                out = handle(url.path, parse_qs(url.query).get("name", ["statement.pdf"])[0], body, self.server)
         except ValueError as e:
             return self.json({"error": str(e)}, 400)
-        self.send(404, b"not found", "text/plain")
+        if out is None:
+            return self.send(404, b"not found", "text/plain")
+        self.json(out)
 
 
 def selfcheck() -> None:

@@ -13,4 +13,4 @@ umask 077   # files we create (ledger, token, dashboard, settings) are readable 
 mkdir -p Statement
 
 .venv/bin/python workspace/fetch_gmail.py "$@"
-echo "Dashboard: $PWD/web/dist/index.html"
+echo "Dashboard: double-click Dashboard.html in $PWD"

@@ -16,16 +16,21 @@ need python3 "Install Python 3.10 or newer."
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || { echo "Python 3.10+ is required." >&2; exit 1; }
 ok "$(python3 --version)"
 
+# Linux: the environment also sees the system's Python packages, for the app window's GTK/WebKit bindings (python3-gi
+# can't be pip-installed without compilers). Re-running on an existing .venv just switches that on; nothing is lost.
+sys_pkgs=; [ "$(uname -s)" = Linux ] && sys_pkgs=--system-site-packages
 if [ -d .venv ]; then
+  python3 -m venv $sys_pkgs .venv
   ok "Python environment already there (.venv)"
 else
   say "Creating the Python environment (.venv)"
-  python3 -m venv .venv
+  python3 -m venv $sys_pkgs .venv
   ok "created"
 fi
-say "Installing Python packages (pdfplumber, Gmail client, ...): about a minute the first time"
+say "Installing Python packages (pdfplumber, Google sign-in, app window, ...): about a minute the first time"
 .venv/bin/python -m pip install --quiet --upgrade pip
 .venv/bin/python -m pip install --quiet -r requirements.txt
+cp requirements.txt .venv/requirements.installed   # run.sh reinstalls when this differs from requirements.txt
 ok "Python packages ready"
 
 say "Preparing folders and your private settings file"
@@ -50,12 +55,50 @@ ok "Statement/ folder and settings ready"
 say "Building the dashboard page"
 .venv/bin/python workspace/build_dashboard.py
 
+# One click to the dashboard: a launcher that runs ./run.sh --app. Linux: an app-menu entry (outside this folder, so
+# it asks first; re-runs refresh it without asking, which also fixes the path after moving the folder). macOS: a file
+# in this folder to double-click.
+case "$(uname -s)" in
+  Linux)
+    desk="${XDG_DATA_HOME:-$HOME/.local/share}/applications/statement-visualizer.desktop"
+    if [ -f "$desk" ] || { [ -t 0 ] && read -rp "Add Statement Visualizer to your app menu? [Y/n] " r && [[ $r != [nN]* ]]; }; then
+      mkdir -p "$(dirname "$desk")"
+      # ponytail: the path is quoted, not escaped; a project path containing " $ ` or \ breaks the launcher
+      cat > "$desk" <<DESK
+[Desktop Entry]
+Type=Application
+Name=Statement Visualizer
+Comment=Your bank statements dashboard (local, offline)
+Exec="$PWD/run.sh" --app
+Icon=x-office-spreadsheet
+Terminal=false
+Categories=Office;Finance;
+DESK
+      ok "App menu: search \"Statement Visualizer\" (to remove: rm $desk)"
+    elif [ ! -t 0 ]; then
+      echo "  (No terminal to ask, so no app-menu launcher. Run ./setup.sh in a terminal to add it.)"
+    fi
+    .venv/bin/python -c "import webview.platforms.gtk" 2>/dev/null ||
+      echo "  (No app window here, so the launcher opens your browser. For the window, Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1)" ;;
+  Darwin)
+    printf '#!/usr/bin/env bash\ncd "$(dirname "$0")" && exec ./run.sh --app\n' > "Statement Visualizer.command"
+    chmod 700 "Statement Visualizer.command"
+    ok "Double-click \"Statement Visualizer.command\" in this folder to open the dashboard" ;;
+esac
+
 cat <<MSG
 
-Setup done. Next:
-  ./run.sh            opens the setup page in your browser: add statements, unlock them, pick a theme
-                      (later runs open a short page to add new statements; ./run.sh --setup = full setup)
-  ./gmail.sh          auto: download statements from Gmail, then build (see README for the Google setup)
-Dashboard file (blank until you add data): $PWD/web/dist/index.html
-Updating from an older version? Run ./run.sh once so the ledger gets the new Bank column.
+Setup done. From now on everything happens in the app: Statement Visualizer in your app menu, or ./run.sh.
+  First time: it walks you through adding statements, passwords, a theme and your expected spending.
+  Later: Add statements (top bar) for new PDFs, the gear for settings.
+  ./gmail.sh          optional: download statements from Gmail, then build (see README for the Google setup)
+No app window possible here? ./run.sh opens the same pages in your browser instead.
+Updating from an older version? Run one update (Add statements, Update) so the ledger gets the new Bank column.
 MSG
+
+# Open the app now (the first-time setup runs in it), unless ./run.sh called this (it opens the app itself) or nobody
+# is at the terminal. Detached: this terminal can be closed.
+if [ -t 0 ] && [ -z "${SV_FROM_RUN:-}" ]; then
+  say "Opening the app"
+  nohup ./run.sh --app >/dev/null 2>&1 &
+fi
