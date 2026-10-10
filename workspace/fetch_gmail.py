@@ -17,6 +17,7 @@ One-time setup (see the notes printed if the .env keys are missing):
 Usage:
     python fetch_gmail.py            # fetch new statements + rebuild
     python fetch_gmail.py --no-build # only download, don't rebuild
+    python fetch_gmail.py --selfcheck
 """
 
 import base64
@@ -40,6 +41,9 @@ GMAIL_QUERY = os.environ.get("GMAIL_QUERY") or "ส่งรายการเ�
 NOTIFY_QUERY = 'from:noreply@krungthai.com "แจ้งผลการ"'
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# Three read-only GETs (list, get, attachment) over plain HTTPS: google-api-python-client would add ~100 MB of
+# API discovery documents to the venv for them.
+API = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 
 # Anchor paths to this script's folder so it runs from any working directory.
 HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
@@ -68,7 +72,9 @@ def service():
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from googleapiclient.discovery import build
+    from google.auth.transport.requests import AuthorizedSession
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
 
     creds = None
     if os.path.exists(TOKEN):
@@ -83,13 +89,26 @@ def service():
                 print("Saved login expired — opening browser to re-authorise.")
                 creds = None
         if not creds or not creds.valid:
+            if not sys.stdin.isatty():      # cron: nobody to click through the browser, don't hang
+                sys.exit("Gmail login missing or expired: run ./gmail.sh by hand once to sign in again.")
             flow = InstalledAppFlow.from_client_config(client_config(), SCOPES)
             creds = flow.run_local_server(port=0)
         fd = os.open(TOKEN, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(creds.to_json())
         os.chmod(TOKEN, 0o600)   # also tightens a token file created earlier with looser permissions
-    return build("gmail", "v1", credentials=creds)
+    session = AuthorizedSession(creds)      # refreshes the access token itself
+    # Back off and retry on rate limits (429) and Google-side errors, which a big first run can hit.
+    session.mount("https://", HTTPAdapter(max_retries=Retry(total=5, backoff_factor=1,
+                                                            status_forcelist=(429, 500, 502, 503))))
+    return session
+
+
+def api(svc, path="", **params):
+    """GET one Gmail API resource as JSON."""
+    r = svc.get(API + path, params=params, timeout=60)
+    r.raise_for_status()
+    return r.json()
 
 
 def iter_attachments(payload):
@@ -109,9 +128,7 @@ def message_ids(svc, query):
     """All message ids matching the query, following pagination."""
     ids, page = [], None
     while True:
-        resp = (
-            svc.users().messages().list(userId="me", q=query, pageToken=page).execute()
-        )
+        resp = api(svc, q=query, pageToken=page)
         ids += [m["id"] for m in resp.get("messages", [])]
         page = resp.get("nextPageToken")
         if not page:
@@ -131,19 +148,13 @@ def fetch(svc, seen):
     for mid in message_ids(svc, GMAIL_QUERY):
         if mid in seen:
             continue
-        msg = svc.users().messages().get(userId="me", id=mid).execute()
+        msg = api(svc, f"/{mid}")
         sender = next((h["value"] for h in msg["payload"].get("headers", [])
                        if h["name"].lower() == "from"), "unknown sender")
         for name, att_id in iter_attachments(msg["payload"]):
             target = os.path.join(OUTDIR, f"{mid[:8]}_{safe_name(name)}")
             if not os.path.exists(target):
-                att = (
-                    svc.users()
-                    .messages()
-                    .attachments()
-                    .get(userId="me", messageId=mid, id=att_id)
-                    .execute()
-                )
+                att = api(svc, f"/{mid}/attachments/{att_id}")
                 data = base64.urlsafe_b64decode(att["data"])
                 with open(target, "wb") as f:
                     f.write(data)
@@ -195,7 +206,7 @@ def fetch_notices(svc, seen):
     for mid in message_ids(svc, NOTIFY_QUERY):
         if "n:" + mid in seen:
             continue
-        msg = svc.users().messages().get(userId="me", id=mid, format="full").execute()
+        msg = api(svc, f"/{mid}", format="full")
         row = parse_notice(body_text(msg["payload"]))
         if row:
             rows.append(row)
@@ -225,7 +236,52 @@ def fetch_notices(svc, seen):
     return len(rows)
 
 
+def save_seen(seen):
+    with open(SEEN, "w") as f:
+        json.dump(sorted(seen), f)
+
+
+def selfcheck():
+    """python fetch_gmail.py --selfcheck: paging, attachment download and the seen list against a fake session."""
+    import tempfile
+    global OUTDIR
+
+    class Resp:
+        def __init__(self, data): self.data = data
+        def raise_for_status(self): pass
+        def json(self): return self.data
+
+    pdf = base64.urlsafe_b64encode(b"%PDF-1 x").decode()
+    calls = []
+
+    class Fake:
+        def get(self, url, params=None, timeout=None):
+            calls.append((url.removeprefix(API), dict(params or {})))
+            path = url.removeprefix(API)
+            if path == "":
+                if params.get("pageToken") is None:
+                    return Resp({"messages": [{"id": "aaaaaaaa11"}], "nextPageToken": "p2"})
+                return Resp({"messages": [{"id": "bbbbbbbb22"}]})
+            if path.endswith("/attachments/att1"):
+                return Resp({"data": pdf})
+            return Resp({"payload": {"headers": [{"name": "From", "value": "bank"}],
+                                     "parts": [{"filename": "s.pdf", "body": {"attachmentId": "att1"}}]}})
+
+    old, OUTDIR = OUTDIR, tempfile.mkdtemp()
+    try:
+        seen = {"bbbbbbbb22"}
+        got = fetch(Fake(), seen)
+        assert [os.path.basename(g) for g in got] == ["aaaaaaaa_s.pdf"], got      # paged, and the seen one skipped
+        assert open(got[0], "rb").read() == b"%PDF-1 x" and "aaaaaaaa11" in seen
+    finally:
+        OUTDIR = old
+    print("selfcheck ok")
+
+
 def main() -> int:
+    if sys.argv[1:] == ["--selfcheck"]:
+        selfcheck()
+        return 0
     seen = set(json.load(open(SEEN))) if os.path.exists(SEEN) else set()
     print(f"Searching Gmail: {GMAIL_QUERY}")
     if "from:" not in GMAIL_QUERY.lower():
@@ -233,8 +289,9 @@ def main() -> int:
               "  be added to your ledger. Add from:<your bank's address> to GMAIL_QUERY in the settings file.")
     svc = service()
     downloaded = fetch(svc, seen)
+    save_seen(seen)         # the PDFs are on disk: a failure while reading notices must not redo a big first run
     notices = fetch_notices(svc, seen)
-    json.dump(sorted(seen), open(SEEN, "w"))
+    save_seen(seen)         # only now: notice ids are marked seen once their rows are in manual_entries.csv
 
     if not (downloaded or notices):
         print("No new statement emails found.")
