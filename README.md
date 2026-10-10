@@ -101,9 +101,13 @@ setup in the browser again.
 
 - **Update the project**: `git pull`, then open the app as usual (or re-run `./install.sh`). Opening it reinstalls
   the packages by itself if `requirements.txt` changed, and always rebuilds the dashboard page first.
-- **Start over with your data**: `./clear.sh` deletes the ledger, the statement cache, `workspace/manual_entries.csv`
-  (hand-typed rows are lost) and the Gmail "seen" list, then rebuilds a blank dashboard. It asks first (`-y` skips the
-  question). Add `--all` to also delete the PDFs in `Statement/`. It never touches `.env` or your Gmail login.
+- **Start over with your data**: `./clear.sh` puts all your data back to how a fresh install looks, and keeps the
+  installed app (the `.venv`, the app-menu entry, the code). It deletes your statement PDFs, the ledger, your hand-typed
+  rows (`workspace/manual_entries.csv`), the dashboard page (it holds your transactions), the statement cache, your
+  expected spending, the saved Gmail login and what the app window saved (labels, theme), and resets `.env` to the blank
+  template (passwords, Google client id/secret, your name, theme). It lists everything and asks first (`-y` skips the
+  question), then rebuilds a blank dashboard. It cannot clear what a *browser* saved (use its site-data settings) or the
+  access you gave Google (see [Uninstall](#uninstall), step 4).
 - **Remove it completely**: see [Uninstall](#uninstall).
 
 ## Uninstall
@@ -252,7 +256,7 @@ You never need these to use the app; they are here for reference.
 | `./run.sh --setup` | the full first-time setup again, in your browser |
 | `./run.sh --rebuild` | rebuilds from the PDFs in `Statement/` in the terminal, no window (also what cron gets) |
 | `./gmail.sh` | downloads new statements from Gmail, then rebuilds (Option 2) |
-| `./clear.sh` | empties your data and keeps the install (see [Updating and resetting](#updating-and-resetting)) |
+| `./clear.sh` | resets all your data and settings to a fresh-install state, keeping the app (see [Updating and resetting](#updating-and-resetting)) |
 | `./setup.sh` | the install step itself, which `./install.sh` and `./run.sh` call; running it directly also opens the app afterwards |
 
 ## Where things are
