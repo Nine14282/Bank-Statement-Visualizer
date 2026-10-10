@@ -5,6 +5,7 @@
 #                                 the first-time setup when there's no ledger yet (statements, passwords, theme,
 #                                 expected spending). Installs what's missing first. No window possible here (no
 #                                 pywebview / WebKit)? The same setup or add-statements pages open in the browser
+#   ./run.sh --web                the browser pages instead of the app window (also the default after ./install.sh --web)
 #   ./run.sh --setup              the full setup page again, in the browser (in the app: the Settings button)
 #   ./run.sh --app                the app, also with nobody at the terminal (what the launcher from ./setup.sh runs)
 #   ./run.sh --rebuild            no browser: rebuild from the PDFs already in Statement/ (asks for a password
@@ -20,30 +21,38 @@ if [ -t 1 ]; then B=$'\033[1;35m'; N=$'\033[0m'; else B= N=; fi
 say() { printf '%s▸%s %s\n' "$B" "$N" "$*"; }
 
 printf '\n%sStatement Visualizer%s\n\n' "$B" "$N"
-# .venv/requirements.installed is copied by setup.sh after a good install: an update that changes requirements.txt
-# (a new package such as pywebview) reinstalls here instead of leaving the old venv to fail quietly.
-if [ ! -x .venv/bin/python ]; then
-  say "First run: installing what it needs (Python packages). This happens once and takes about a minute."
-  SV_NO_OPEN=1 ./setup.sh   # this script opens the app itself, so setup must not
-  echo
-elif ! cmp -s requirements.txt .venv/requirements.installed; then
-  say "Updating the Python packages (requirements changed). This takes about a minute."
-  SV_NO_OPEN=1 ./setup.sh
-  echo
-fi
-
-setup=0; rebuild=0; app=0; args=()
+setup=0; rebuild=0; app=0; web=0; args=()
 for a in "$@"; do
   case "$a" in
     --setup) setup=1 ;;
     --rebuild) rebuild=1 ;;
     --app) app=1 ;;
+    --web) web=1 ;;
     *) args+=("$a") ;;   # e.g. --password=...: means a terminal rebuild
   esac
 done
+# .venv/mode is written by setup.sh (app or web; ./install.sh --web = browser only, no pywebview).
+# .venv/requirements.installed is copied by setup.sh after a good install: an update that changes the requirements
+# files (a new package such as pywebview) reinstalls here instead of leaving the old venv to fail quietly.
+if [ -r .venv/mode ]; then mode=$(cat .venv/mode); elif [ "$web" = 1 ]; then mode=web; else mode=app; fi
+reqs=(requirements.txt); [ "$mode" = app ] && reqs+=(requirements-app.txt)
+if [ ! -x .venv/bin/python ]; then
+  say "First run: installing what it needs (Python packages). This happens once and takes about a minute."
+  SV_NO_OPEN=1 ./setup.sh "--$mode"   # this script opens the app itself, so setup must not
+  echo
+elif ! cat "${reqs[@]}" | cmp -s - .venv/requirements.installed; then
+  say "Updating the Python packages (requirements changed). This takes about a minute."
+  SV_NO_OPEN=1 ./setup.sh "--$mode"
+  echo
+fi
+if [ "$app" = 1 ] && [ "$mode" = web ]; then
+  echo "Installed without the app window. Run ./install.sh --app to add it (or ./run.sh for the browser)." >&2
+  exit 1
+fi
+
 # The app (launcher, or a person at the terminal): the dashboard, or the first-time setup with no ledger yet; it adds
 # statements and changes settings itself. Exit 3 = no window possible here: the browser pages below instead.
-if [ "$setup" = 0 ] && [ "$rebuild" = 0 ] && [ ${#args[@]} -eq 0 ] && { [ "$app" = 1 ] || [ -t 0 ]; }; then
+if [ "$setup" = 0 ] && [ "$rebuild" = 0 ] && [ "$web" = 0 ] && [ "$mode" = app ] && [ ${#args[@]} -eq 0 ] && { [ "$app" = 1 ] || [ -t 0 ]; }; then
   .venv/bin/python workspace/build_dashboard.py >/dev/null   # always: a pull may bring a newer page, settings may change
   say "Opening the app"
   code=0; .venv/bin/python workspace/app.py || code=$?

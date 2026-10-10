@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # One-time setup (safe to re-run; ./install.sh is the friendly front door): Python venv + packages, settings file. No Node.js needed: the dashboard page
 # ships prebuilt (web/prebuilt/index.html) and Python fills in your data.
+#   ./setup.sh [--app|--web]   --app: app window (pywebview + launcher); --web: browser only. Default: the mode already
+#                              installed (.venv/mode), else app.
 set -euo pipefail
 cd "$(dirname "$0")"
+mode=app; [ ! -r .venv/mode ] || mode=$(cat .venv/mode)
+for a in "$@"; do
+  case "$a" in
+    --app|--web) mode=${a#--} ;;
+    *) echo "usage: ./setup.sh [--app|--web]" >&2; exit 2 ;;
+  esac
+done
 umask 077   # files we create (ledger, token, dashboard, settings) are readable by you only
 
 # Progress lines: "▸ step" (bold violet on a terminal), "  ✓ result". Each slow step says what it does first.
@@ -18,7 +27,7 @@ ok "$(python3 --version)"
 
 # Linux: the environment also sees the system's Python packages, for the app window's GTK/WebKit bindings (python3-gi
 # can't be pip-installed without compilers). Re-running on an existing .venv just switches that on; nothing is lost.
-sys_pkgs=; [ "$(uname -s)" = Linux ] && sys_pkgs=--system-site-packages
+sys_pkgs=; [ "$(uname -s)" = Linux ] && [ "$mode" = app ] && sys_pkgs=--system-site-packages
 if [ -d .venv ]; then
   python3 -m venv $sys_pkgs .venv
   ok "Python environment already there (.venv)"
@@ -27,10 +36,13 @@ else
   python3 -m venv $sys_pkgs .venv
   ok "created"
 fi
-say "Installing Python packages (pdfplumber, Google sign-in, app window, ...): about a minute the first time"
+say "Installing Python packages (pdfplumber, Google sign-in$([ "$mode" = app ] && echo ', app window'), ...): about a minute the first time"
+reqs=(requirements.txt); [ "$mode" = app ] && reqs+=(requirements-app.txt)
+pip_args=(); for r in "${reqs[@]}"; do pip_args+=(-r "$r"); done
 .venv/bin/python -m pip install --quiet --upgrade pip
-.venv/bin/python -m pip install --quiet -r requirements.txt
-cp requirements.txt .venv/requirements.installed   # run.sh reinstalls when this differs from requirements.txt
+.venv/bin/python -m pip install --quiet "${pip_args[@]}"
+cat "${reqs[@]}" > .venv/requirements.installed   # run.sh reinstalls when this differs from the requirements files
+echo "$mode" > .venv/mode
 ok "Python packages ready"
 
 say "Preparing folders and your private settings file"
@@ -58,8 +70,8 @@ say "Building the dashboard page"
 # One click to the dashboard: a launcher that runs ./run.sh --app. Linux: an app-menu entry (outside this folder, so
 # it asks first; re-runs refresh it without asking, which also fixes the path after moving the folder). macOS: a file
 # in this folder to double-click.
-case "$(uname -s)" in
-  Linux)
+case "$mode-$(uname -s)" in
+  app-Linux)
     desk="${XDG_DATA_HOME:-$HOME/.local/share}/applications/statement-visualizer.desktop"
     if [ -f "$desk" ] || { [ -t 0 ] && read -rp "Add Statement Visualizer to your app menu? [Y/n] " r && [[ $r != [nN]* ]]; }; then
       mkdir -p "$(dirname "$desk")"
@@ -80,11 +92,23 @@ DESK
     fi
     .venv/bin/python -c "import webview.platforms.gtk" 2>/dev/null ||
       echo "  (No app window here, so the launcher opens your browser. For the window, Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1)" ;;
-  Darwin)
+  app-Darwin)
     printf '#!/usr/bin/env bash\ncd "$(dirname "$0")" && exec ./run.sh --app\n' > "Statement Visualizer.command"
     chmod 700 "Statement Visualizer.command"
     ok "Double-click \"Statement Visualizer.command\" in this folder to open the dashboard" ;;
 esac
+
+if [ "$mode" = web ]; then
+  cat <<MSG
+
+Setup done (browser mode). Run ./run.sh: it opens the setup and add-statements pages in your browser.
+  First time: it walks you through adding statements, passwords, a theme and your expected spending.
+  Leave that terminal open while you use the page; the dashboard opens in your browser when it is built.
+  ./gmail.sh          optional: download statements from Gmail, then build (see README for the Google setup)
+  Want the app window instead? ./install.sh --app
+MSG
+  exit 0
+fi
 
 cat <<MSG
 
