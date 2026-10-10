@@ -7,8 +7,8 @@ a searchable transaction table, and a warning if a statement month looks missing
 Everything runs on your machine. Nothing is uploaded. Apart from the one-time package install, the only network use
 is the optional read-only Gmail download.
 
-**In short:** `git clone` the project, run `./run.sh`, drop in your statement PDFs. See [Install](#install) and
-[Get started](#get-started).
+**In short:** `git clone` the project and run `./install.sh`. Later, open **Statement Visualizer** and drop in your
+statement PDFs. See [Install](#install) and [Get started](#get-started).
 
 > Supports Krungthai's and KBank's Thai statement PDFs (the parsers read those layouts; the bank is
 > detected per file). Both accounts go into one ledger; each row shows which bank it came from, and
@@ -30,11 +30,11 @@ is the optional read-only Gmail download.
 ```bash
 git clone https://github.com/Nine14282/Income-and-Expenses-Dashboard.git
 cd Income-and-Expenses-Dashboard
-./run.sh
+./install.sh
 ```
 
-That is the whole install. The first `./run.sh` sees that nothing is set up yet and runs `./setup.sh` for you
-(about a minute, needs the internet). It:
+That is the whole install: it gets the app onto your computer and **does not open it**. It takes about a minute and
+needs the internet. It:
 
 1. checks Python 3.10+;
 2. creates a private Python environment in `.venv/` and installs `requirements.txt` into it (on Linux the environment
@@ -46,15 +46,22 @@ That is the whole install. The first `./run.sh` sees that nothing is set up yet 
    `.desktop` file under `~/.local/share/applications/`). **macOS**: writes `Statement Visualizer.command` in the
    project folder, to double-click.
 
-Then it opens the app. Re-running `./setup.sh` is safe: it keeps your `.env` values and your data.
+When it finishes it tells you how to open the app (next section). Re-running `./install.sh` is safe: it keeps your
+`.env` values and your data. To take it off your computer again, see [Uninstall](#uninstall).
 
-Downloaded the project as a zip and `./run.sh` says *Permission denied*? The zip lost the "executable" mark: run
-`chmod +x *.sh` once, then `./run.sh` again (`bash run.sh` alone is not enough, the scripts call each other).
+Downloaded the project as a zip and `./install.sh` says *Permission denied*? The zip lost the "executable" mark: run
+`chmod +x *.sh` once, then `./install.sh` again.
 
 ## Get started
 
-Your first run has no data yet, so the app opens a short setup, one screen per step, **Next** to go on
-(**Skip** on the optional Spending step, about 2 minutes in all):
+Installing did not open anything. Open the app whenever you want to use it:
+
+- **Linux**: **Statement Visualizer** in your app menu.
+- **macOS** (untested): double-click `Statement Visualizer.command` in the project folder.
+- **From a terminal (any system)**: `./run.sh` in the project folder. This is what the menu entry runs.
+
+Everything after that happens in the app, no terminal needed. Your first time there is no data yet, so the app opens a
+short setup, one screen per step, **Next** to go on (**Skip** on the optional Spending step; about 2 minutes in all):
 
 1. **Welcome**: press **Get started**.
 2. **Statements** (required): drop in one or more statement PDFs, or click to choose. They are copied into
@@ -73,34 +80,73 @@ Your first run has no data yet, so the app opens a short setup, one screen per s
 You now have **income vs expense, balance over time, categories, a monthly spend rate and a searchable
 transaction table**, plus a warning if a month of statements looks missing.
 
-### Opening it again
+### Using it later
 
-- **Linux**: if you said yes to the app-menu question during install, search for **Statement Visualizer** in your
-  app menu (in GNOME, right-click → *Add to Favourites* pins it to the dock). Otherwise run `./run.sh` in the project
-  folder, or re-run `./setup.sh` and answer Y. Moved the project folder? Re-run `./setup.sh` to refresh the menu entry.
-- **macOS** (untested): double-click `Statement Visualizer.command` in the project folder, or run `./run.sh`.
-- **Any system**: double-click `Dashboard.html` in the project folder to view your last build in a browser (setup
-  creates it empty; it shows your data after the first build). Keep it in the project folder: it just forwards to
-  `web/dist/index.html`.
-
-Inside the app: **Add statements** (top bar) for new PDFs, and the gear for settings (the same steps again: theme,
-expected spending, passwords). No terminal needed. On Linux the window keeps its own labels, expected spending and
-theme (in `workspace/.app/`), apart from any browser's; on macOS it uses the system web view's own store.
+- **Menu entry missing (Linux)?** You answered *no* to the app-menu question during install: re-run `./install.sh` and
+  answer Y (it also refreshes the entry if you moved the project folder). In GNOME, right-click the entry →
+  *Add to Favourites* pins it to the dock.
+- **Just look at the last dashboard**: double-click `Dashboard.html` in the project folder to see it in a browser
+  (install creates it empty; it shows your data after the first build). Keep it in the project folder: it just forwards
+  to `web/dist/index.html`.
+- **Inside the app**: **Add statements** (top bar) for new PDFs, and the gear for settings (the same steps again:
+  theme, expected spending, passwords). On Linux the window keeps its own labels, expected spending and theme (in
+  `workspace/.app/`), apart from any browser's; on macOS it uses the system web view's own store.
 
 **No app window?** Without the system web view, `./run.sh` opens the same setup and add-statements pages in your
 browser instead. If the tab doesn't open on its own, go to the one-time link `./run.sh` printed
 (`http://127.0.0.1:…/?setup=…`) and leave that terminal open while you use the page. `./run.sh --setup` opens the full
 setup in the browser again.
 
-### Updating, resetting, removing
+### Updating and resetting
 
-- **Update the project**: `git pull`, then `./run.sh`. It reinstalls the packages by itself if `requirements.txt`
-  changed, and always rebuilds the dashboard page first.
+- **Update the project**: `git pull`, then open the app as usual (or re-run `./install.sh`). Opening it reinstalls
+  the packages by itself if `requirements.txt` changed, and always rebuilds the dashboard page first.
 - **Start over with your data**: `./clear.sh` deletes the ledger, the statement cache, `workspace/manual_entries.csv`
   (hand-typed rows are lost) and the Gmail "seen" list, then rebuilds a blank dashboard. It asks first (`-y` skips the
   question). Add `--all` to also delete the PDFs in `Statement/`. It never touches `.env` or your Gmail login.
-- **Remove it**: delete the project folder (it holds the `.venv`, your PDFs, ledger and `.env`), and on Linux
-  `rm ~/.local/share/applications/statement-visualizer.desktop`.
+- **Remove it completely**: see [Uninstall](#uninstall).
+
+## Uninstall
+
+Nearly everything lives inside the project folder, so removing it is mostly deleting that folder. The script does the
+local part for you:
+
+```bash
+./uninstall.sh           # removes the app-menu entry/launcher, .venv, web/node_modules and the generated dashboard;
+                         # keeps your PDFs, ledger, .env and Gmail login (./install.sh sets it all up again)
+./uninstall.sh --all     # also deletes this whole project folder, data included; you must type the folder name
+./uninstall.sh -n        # only list what would be removed (add -y to skip the "Continue?" question)
+```
+
+It cannot remove your cron line or the access you gave Google (steps 3 and 4 below); it reminds you. To do it by
+hand instead, or to see what the script does, follow these steps in order:
+
+1. **Keep what you want first.** Deleting the folder also deletes your statement PDFs (`Statement/`), the ledger
+   (`workspace/ledger.csv`), your hand-typed rows (`workspace/manual_entries.csv`), and `.env`, which holds any
+   passwords you chose to *Remember* and your Gmail client secret. Copy out anything you still need. To empty the
+   data but keep the install, use `./clear.sh` instead (see above).
+2. **Remove the launcher** (it sits outside the folder on Linux):
+   - **Linux**: `rm ~/.local/share/applications/statement-visualizer.desktop` (under `$XDG_DATA_HOME/applications/`
+     if you set that).
+   - **macOS** (untested): the launcher is `Statement Visualizer.command` inside the folder, so step 5 removes it.
+3. **Stop the schedule**, if you set up the unattended Gmail download: run `crontab -e` and delete the
+   `./gmail.sh` line.
+4. **Revoke the Gmail access**, if you used Option 2: open <https://myaccount.google.com/permissions>, pick the app
+   name you gave your Google Cloud project, and choose *Remove access*. You can also delete that project in the
+   [Google Cloud console](https://console.cloud.google.com/). Deleting the folder removes the saved login
+   (`workspace/token.json`) from this computer but does not revoke it at Google.
+5. **Delete the project folder** (this also removes the `.venv`, so nothing was installed system-wide):
+   ```bash
+   cd .. && rm -rf Income-and-Expenses-Dashboard
+   ```
+   Use your folder's real name. Check you are deleting the right folder first: `rm -rf` has no undo.
+6. **Optional leftovers**:
+   - Your browser keeps the dashboard's labels, expected spending and theme in its own site data for the
+     `Dashboard.html` page. Clear it in the browser's site-data settings if you opened the dashboard in a browser.
+   - On macOS the app window keeps the same settings in the system web view's own store (on Linux they were in
+     `workspace/.app/`, which step 5 removed).
+   - Packages you installed with `apt` yourself (`python3-venv`, `python3-gi`, `gir1.2-webkit2-4.1`) are general
+     system packages and are left alone. Remove them only if nothing else uses them.
 
 ## Option 1: add statements yourself
 
@@ -194,6 +240,21 @@ it, or Gmail notices do): header line `Date,Description,Category,Amount,Balance`
 `2026-01-31 14:05,Lunch,Food,-120,` (Date as `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`, Balance blank, Amount negative for
 spending). A bad row is skipped with a message.
 
+## Terminal commands
+
+You never need these to use the app; they are here for reference.
+
+| Command | What it does |
+|---|---|
+| `./install.sh` | installs the app (see [Install](#install)); safe to re-run |
+| `./uninstall.sh` | removes it again (see [Uninstall](#uninstall)) |
+| `./run.sh` | opens the app, the same as the menu entry; on a fresh clone it installs first |
+| `./run.sh --setup` | the full first-time setup again, in your browser |
+| `./run.sh --rebuild` | rebuilds from the PDFs in `Statement/` in the terminal, no window (also what cron gets) |
+| `./gmail.sh` | downloads new statements from Gmail, then rebuilds (Option 2) |
+| `./clear.sh` | empties your data and keeps the install (see [Updating and resetting](#updating-and-resetting)) |
+| `./setup.sh` | the install step itself, which `./install.sh` and `./run.sh` call; running it directly also opens the app afterwards |
+
 ## Where things are
 
 ```
@@ -205,7 +266,7 @@ workspace/token.json        cached Gmail login   (git-ignored, secret)
 workspace/.cache/           statements already read, so updates only read new ones (git-ignored, private)
 workspace/.app/             the app window's saved labels, theme and expected spending (Linux; git-ignored)
 .env                        your settings        (git-ignored, secret)
-.venv/                      the Python environment ./setup.sh makes (git-ignored)
+.venv/                      the Python environment ./install.sh makes (git-ignored)
 Dashboard.html              opens the dashboard  (generated, git-ignored)
 web/dist/index.html         the dashboard        (generated, git-ignored)
 ```
@@ -216,14 +277,14 @@ commit the code. The dashboard file contains your transactions: share it only on
 ## Troubleshooting
 
 - **Setup stops at `python3 -m venv`, with a message about `ensurepip`** (Debian/Ubuntu) → `sudo apt install
-  python3-venv`, then `./run.sh` again.
-- **`./run.sh` or `./setup.sh`: Permission denied** → `bash run.sh` / `bash setup.sh`, or `chmod +x *.sh`.
-- **"Not set up yet"** (from `./gmail.sh`) → run `./run.sh` or `./setup.sh` first.
-- **The install failed halfway (no internet)** → run `./run.sh` again; it retries the install by itself.
+  python3-venv`, then `./install.sh` again.
+- **`./install.sh` or `./run.sh`: Permission denied** → `chmod +x *.sh`, then again.
+- **"Not set up yet"** (from `./gmail.sh`) → run `./install.sh` first.
+- **The install failed halfway (no internet)** → run `./install.sh` again (`./run.sh` also retries it by itself).
 - **"No PDFs in Statement/"** → add them on the page `./run.sh` opens, or copy them there first.
 - **The app opens in the browser, not its own window** → the system web view is missing (see *What you need*).
   Everything works the same, in a tab. If you installed it in an environment other than the system's `python3`
-  (pyenv, conda), it can't see those Linux packages: delete `.venv` and run `PATH=/usr/bin:$PATH ./setup.sh`.
+  (pyenv, conda), it can't see those Linux packages: delete `.venv` and run `PATH=/usr/bin:$PATH ./install.sh`.
 - **The page didn't open** → open the `http://127.0.0.1:…/?setup=…` link that `./run.sh` printed.
   It only works once, and only while `./run.sh` is running (Ctrl+C there stops it; run `./run.sh` again for a fresh
   link). No browser on this machine: put the PDFs in `Statement/` and run

@@ -11,11 +11,13 @@ Statement Visualizer: bank-statement PDFs (Krungthai/KTB and Kasikorn/KBank) →
 Run from anywhere (scripts anchor paths to their own folder). Use the project venv: `.venv/bin/python`.
 
 ```bash
+./install.sh                                       # the user-facing install: runs setup.sh with SV_NO_OPEN=1, so nothing opens
 ./setup.sh                                         # once: venv + requirements.txt + .env from .env.example (adds new keys to an existing .env); no Node needed
 ./run.sh                                           # use case 1: first run (no ledger.csv) installs what's missing and opens the setup page; later runs open the "add statements" page (welcome.py --add)
 ./run.sh --setup                                   # open the full setup page again (workspace/welcome.py)
 ./run.sh --rebuild                                 # terminal rebuild from Statement/*.pdf, no browser (also with --password=, or when stdin isn't a terminal, e.g. cron)
 ./gmail.sh                                         # use case 2 (auto): Gmail -> Statement/ -> dashboard; cron-friendly
+./uninstall.sh [--all] [-y] [-n]                    # remove launcher, .venv, node_modules, generated dashboard (--all: the whole folder, data included; -n = dry run)
 .venv/bin/python workspace/update_statement.py     # main entry: Statement/*.pdf -> ledger.csv -> web/dist/index.html
 KTB_PW=xxxx KBANK_PW=yyyy .venv/bin/python workspace/update_statement.py   # unattended (else prompts; also --password=)
 .venv/bin/python workspace/fetch_gmail.py          # pull new statement PDFs + payment-notice emails from Gmail, then update (--no-build to skip)
