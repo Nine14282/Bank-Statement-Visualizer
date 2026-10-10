@@ -1,9 +1,7 @@
-@layer theme, base, mui, components, utilities;
 /* Scan only src/ for class names, never the ledger data: the build is committed (prebuilt/index.html), so it must not
    depend on, or pick up text from, anyone's data or its own previous output. */
 @import "tailwindcss" source("../src");
 @source not "./data";
-@import "tw-animate-css";
 @import "./shadcn.css";
 @font-face {
     font-family: "Geist";
@@ -28,8 +26,10 @@
 
 @theme inline {
     --font-heading: var(--font-display);
-    --font-display: 'Outfit', 'Geist', sans-serif;
-    --font-sans: 'Geist', sans-serif;
+    /* Thai text (bank descriptions) gets Noto Sans Thai before the generic family: a generic name ends the list, and
+       leaving Thai to the system's fallback search cost ~0.25 s of the first paint in WebKitGTK. */
+    --font-display: 'Outfit', 'Geist', 'Noto Sans Thai', sans-serif;
+    --font-sans: 'Geist', 'Noto Sans Thai', sans-serif;
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -108,7 +108,7 @@
     @apply bg-background text-foreground;
     }
   /* Tailwind v4 resets buttons to the default cursor; every clickable thing here should show the hand. */
-  button:not(:disabled), [role="button"], [role="tab"], [role="radio"] { cursor: pointer; }
+  button:not(:disabled), [role="button"] { cursor: pointer; }
   /* One visible keyboard focus ring for every custom control. */
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   html {
@@ -138,21 +138,23 @@
     --color-expense: var(--expense);
     --color-pos: var(--pos);
     --color-neg: var(--neg);
-    --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-mono: "Geist Mono", "Noto Sans Thai", monospace;
 }
-body { font-family: var(--font-sans), "Noto Sans Thai", "Sarabun", system-ui, sans-serif; }
-.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* In @layer components, not unlayered: an unlayered rule beats every Tailwind utility, so `text-2xl` etc. on these
+   would be ignored. */
+@layer components {
+  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-/* ---- data / stats styling: geometric display figures, mono caps labels ---- */
-.display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.025em;
-           font-variant-numeric: lining-nums tabular-nums; }
-.eyebrow { font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-transform: uppercase;
-           letter-spacing: 0.1em; color: var(--muted-foreground); }
-.pill { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
-        padding: 2px 8px; border: 1px solid color-mix(in oklab, var(--income) 70%, transparent);
-        border-radius: 6px; color: var(--foreground); }
-[data-slot="card-title"] { font-size: 1.125rem; font-weight: 450; letter-spacing: -0.015em; }
-h1, h2 { font-family: var(--font-display); }
+  /* ---- data / stats styling: geometric display figures, mono caps labels ---- */
+  .display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.025em;
+             font-variant-numeric: lining-nums tabular-nums; }
+  .eyebrow { font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-transform: uppercase;
+             letter-spacing: 0.1em; color: var(--muted-foreground); }
+  .pill { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+          padding: 2px 8px; border: 1px solid color-mix(in oklab, var(--income) 70%, transparent);
+          border-radius: 6px; color: var(--foreground); }
+  h1, h2 { font-family: var(--font-display); }
+}
 
 /* New transaction rows (tx-table.tsx): slide in and fade a violet highlight. */
 @keyframes tx-new {
@@ -169,7 +171,11 @@ h1, h2 { font-family: var(--font-display); }
 /* Segmented progress (widgets.tsx): ticks fill one after another. */
 @keyframes tick-in { from { transform: scaleY(0.3); opacity: 0; } }
 .tick { animation: tick-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
-@media (prefers-reduced-motion: reduce) { .tick { animation: none; } }
+@media (prefers-reduced-motion: reduce) { :root:not(.arriving) .tick { animation: none; } }   /* .arriving: main.tsx */
+/* The app window's entrance after an update (.arriving, main.tsx): the top bar and nav rail appear too; cards, charts
+   and figures animate through Motion. `transform` only: the nav rail keeps its own centring in `translate`. */
+@keyframes appear { from { opacity: 0; transform: translateY(-8px); } }
+.arriving :is(header[data-od-id="topbar"], nav[data-od-id="sidebar"]) { animation: appear 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
 /* Setup welcome (components/setup/wizard.tsx Hero): the theme's own background with slowly drifting glows in the
    brand violet (and a little of the expense coral, as on the dashboard). Text uses the theme's foreground tokens,

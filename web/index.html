@@ -2,6 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- The theme's background from the very first frame. The app's own CSS comes after its ~1 MB script and takes ~1 s
+         to apply, and until then WebKit (the desktop app window) painted white: ~1 s of white at start and after an
+         update. build_dashboard.py sets data-theme from the THEME setting; Midnight (dark) is the default. -->
+    <style>html{background:#0a080b;color-scheme:dark}html[data-theme=daylight]{background:#f2f2f6;color-scheme:light}</style>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Statement Visualizer</title>
   </head>

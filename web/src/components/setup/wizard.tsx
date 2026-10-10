@@ -1,27 +1,52 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, MotionConfig, MotionGlobalConfig, motion } from 'motion/react'
 import {
-  ArrowLeft, ArrowRight, Check, CircleAlert, Eye, EyeOff, FileText, Loader2, LockKeyhole, Mail,
-  Plus, ShieldCheck, Trash2, Upload,
+  ArrowLeft, ArrowRight, Check, CircleAlert, Eye, EyeOff, FileText, GitMerge, LayoutDashboard, Loader2, LockKeyhole,
+  Mail, Plus, ShieldCheck, Sparkles, Trash2, Upload, type LucideIcon,
 } from 'lucide-react'
 import { BankLogo, Segmented } from '@/components/ledger/widgets'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { bankName } from '@/lib/banks'
 import { baht } from '@/lib/ledger'
-import { newId, type PlanItem } from '@/lib/plan'
+import { expectedFor, newId, type PlanItem } from '@/lib/plan'
 import { THEMES, type useTheme } from '@/lib/themes'
-import { EASE, cn } from '@/lib/utils'
+import { APP, EASE, cn } from '@/lib/utils'
 
 // First-run setup, shown when ./run.sh's local server (workspace/welcome.py) opens the page at /?setup.
 // Later runs open the short "add statements" version at /?setup&add (welcome.py --add): no welcome, theme or
-// spending steps, and finishing leaves the saved theme and expected spending alone.
+// spending steps, and finishing leaves the saved theme and expected spending alone. The app window shows that add
+// version over its dashboard (App.tsx, onClose), never the full setup.
 // One screen per step, no page scroll. The server already swapped its one-time link token for an HttpOnly cookie
 // (sent automatically); every call adds the X-Setup header, which other sites can't send without a CORS preflight.
-const ADD = new URLSearchParams(location.search).has('add')
-const STEPS = ADD ? ['Statements', 'Passwords', 'Finish'] as const : ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 'Finish'] as const
+const ADD = new URLSearchParams(location.search).has('add')   // the browser's add page (welcome.py --add); the app passes `mode`
+const SETUP_STEPS = ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 'Finish'] as const
+const ADD_STEPS = ['Statements', 'Passwords', 'Finish'] as const
+type Step = (typeof SETUP_STEPS)[number]
+
+// The app window (App.tsx shows this over the dashboard) has no server: pywebview's bridge calls workspace/app.py's
+// Api.call with the same paths. pywebview creates its api object empty and fills it in just before pywebviewready, so
+// wait for the method itself. PDFs travel base64-encoded.
+type Bridge = { call: (path: string, name: string, data: unknown) => Promise<any> }
+const bridge = () => new Promise<Bridge>((ok) => {
+  const w = window as unknown as { pywebview?: { api?: Partial<Bridge> } }
+  if (w.pywebview?.api?.call) ok(w.pywebview.api as Bridge)
+  else window.addEventListener('pywebviewready', () => ok(w.pywebview!.api as Bridge), { once: true })
+})
+const base64 = (b: Blob) => new Promise<string>((ok, fail) => {
+  const r = new FileReader()
+  r.onload = () => ok(String(r.result).split(',', 2)[1])
+  r.onerror = () => fail(r.error)
+  r.readAsDataURL(b)
+})
 
 const api: Api = async (path, body, raw = false) => {
+  if (APP) {
+    const [p, q] = path.split('?')
+    const j = await (await bridge()).call(p, new URLSearchParams(q).get('name') ?? '', raw ? await base64(body as Blob) : body ?? null)
+    if (j?.error) throw new Error(j.error)
+    return j
+  }
   const r = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'X-Setup': '1', ...(body === undefined ? {} : { 'Content-Type': raw ? 'application/pdf' : 'application/json' }) },
@@ -32,6 +57,7 @@ const api: Api = async (path, body, raw = false) => {
   return j
 }
 
+type Progress = { stage: string; done: number; total: number }   // /api/progress: what the build is doing
 type BankRow = { id: string; name: string; saved: boolean }
 type FileRow = { name: string; bank: string | null; locked: boolean; ok: boolean; uploaded: boolean }
 type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[] }
@@ -41,15 +67,22 @@ type Api = (path: string, body?: unknown, raw?: boolean) => Promise<any>   // JS
 const primary = 'inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-[0_8px_20px_-8px_var(--brand)] transition hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none'
 const ghost = 'inline-flex items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm transition hover:bg-muted active:scale-95 disabled:opacity-40'
 
-export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof useTheme> }) {
+// mode: the app window says which (App.tsx); the browser's page reads it from its address. Over the dashboard (onClose,
+// the app's Settings) the full setup skips its Welcome screen.
+export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
+  theme: ReturnType<typeof useTheme>; mode?: 'setup' | 'add'; onClose?: () => void
+}) {
+  const add = mode ? mode === 'add' : ADD
+  const steps: readonly Step[] = add ? ADD_STEPS : onClose ? SETUP_STEPS.slice(1) : SETUP_STEPS
   const [step, setStep] = useState(0)
   const [st, setSt] = useState<State | null>(null)
   const [error, setError] = useState('')
   const [plan, setPlan] = useState<PlanItem[]>([])
   const [result, setResult] = useState<{ ok: boolean; log?: string; dashboard?: string } | null>(null)
   const [building, setBuilding] = useState(false)
+  const [progress, setProgress] = useState<Progress>({ stage: 'start', done: 0, total: 0 })
 
-  const refresh = useCallback(() => api('/api/state').then((s: State) => setSt(s)).catch((e) => setError(e.message)), [])
+  const refresh = useCallback(() => api('/api/state').then((s: State) => setSt(s)).catch((e) => setError(e.message)), [setError])
   useEffect(() => {
     api('/api/state').then((s: State) => { setSt(s); setPlan(s.plan ?? []) }).catch((e) => setError(e.message))
   }, [])
@@ -57,7 +90,7 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
   const files = st?.files ?? []
   const lockedBanks = [...new Set(files.filter((f) => f.locked && f.bank).map((f) => f.bank!))]
   const [uploading, setUploading] = useState(0)
-  const name = STEPS[step]
+  const name = steps[step]
   // A bank is only needed to route a password: an unrecognised file that opens without one (e.g. a non-statement
   // PDF from a statement email) doesn't block, and the build just reads nothing from it.
   const canNext = name === 'Statements' ? files.length > 0 && files.every((f) => f.bank || f.ok) && !uploading
@@ -68,26 +101,51 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
 
   const go = (d: number) => { setError(''); setStep((s) => s + d) }
   const finish = async () => {
+    // The loader animates even in the app window (DESIGN.md "Desktop app window"). Switched on here, before it
+    // mounts: its children start their animations before any effect of its own could.
+    MotionGlobalConfig.skipAnimations = false
     setBuilding(true)
     setResult(null)
-    try { setResult(await api('/api/finish', ADD ? {} : { theme: theme.id, plan })) }
+    setProgress({ stage: 'start', done: 0, total: 0 })
+    // The build answers only when it's done; meanwhile ask what it's doing, for the loader.
+    const poll = setInterval(() => api('/api/progress').then((p: Progress) => p.stage && setProgress(p)).catch(() => {}), 300)
+    try {
+      const r = await api('/api/finish', add ? {} : { theme: theme.id, plan })
+      clearInterval(poll)
+      if (APP && r.ok) {
+        // App window: the loader lands on "Done", this page's content fades to its bare background, and the page reloads
+        // for the new data (it's baked into the page); the dashboard then plays its entrance (main.tsx). Web Animations
+        // API: the window skips Motion animations.
+        setProgress({ stage: 'done', done: 0, total: 0 })
+        setTimeout(() => {
+          for (const c of document.querySelector('[data-od-id="setup-wizard"]')?.children ?? [])
+            c.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'ease-out', fill: 'forwards' })
+          // by the clock, not the animations' `finished` (a cancelled one never resolves): nothing can keep it here
+          setTimeout(() => location.replace('?app&updated'), 420)
+        }, 900)
+        return
+      }
+      setResult(r)
+    }
     catch (e) { setResult({ ok: false, log: (e as Error).message }) }
+    clearInterval(poll)
+    MotionGlobalConfig.skipAnimations = APP   // back to main.tsx's setting
     setBuilding(false)
   }
 
   const body: ReactNode = {
     Welcome: null,   // the full-screen Hero, rendered below
-    Statements: <Statements key="s" api={api} st={st} refresh={refresh} onError={setError} onBusy={setUploading} />,
+    Statements: <Statements key="s" add={add} api={api} st={st} refresh={refresh} onError={setError} onBusy={setUploading} />,
     Passwords: <Passwords key="p" api={api} st={st} banks={lockedBanks} refresh={refresh} />,
     Theme: <ThemeStep key="t" current={theme.id} pick={pickTheme} />,
     Spending: <Spending key="e" plan={plan} setPlan={setPlan} />,
-    Finish: <Finish key="f" building={building} result={result} retry={finish} />,
+    Finish: <Finish key="f" add={add} building={building} progress={progress} result={result} retry={finish} />,
   }[name]
 
   if (name === 'Welcome') return <Hero onStart={() => go(1)} />
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-hidden" data-od-id="setup-wizard">
+    <div className={cn('flex h-dvh flex-col overflow-hidden', onClose ? 'fixed inset-0 z-50 bg-background' : 'relative')} data-od-id="setup-wizard">
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
         <span className="glow -top-24 left-1/4 size-96 bg-brand" />
         <span className="glow bottom-0 right-0 size-80 bg-expense" />
@@ -97,10 +155,10 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
         <span className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-lg text-background" aria-hidden>฿</span>
         <div className="min-w-0">
           <p className="text-sm font-medium">Statement Visualizer</p>
-          <p className="text-xs text-muted-foreground">{ADD ? 'Add statements' : 'Setup'} · step {step + 1} of {STEPS.length}</p>
+          <p className="text-xs text-muted-foreground">{add ? 'Add statements' : onClose ? 'Settings' : 'Setup'} · step {step + 1} of {steps.length}</p>
         </div>
         <ol className="ml-auto hidden items-center gap-1 rounded-full border bg-card p-1 md:flex" aria-label="Setup steps">
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <li key={s} aria-current={i === step ? 'step' : undefined}
               className={cn('relative rounded-full px-3 py-1.5 text-xs font-medium', i === step ? 'text-white' : i < step ? 'text-foreground' : 'text-muted-foreground')}>
               {i === step && <motion.span layoutId="setup-step" className="absolute inset-0 rounded-full bg-brand" transition={{ type: 'spring', stiffness: 400, damping: 32 }} />}
@@ -126,19 +184,21 @@ export function Wizard({ theme: [theme, pickTheme] }: { theme: ReturnType<typeof
         </div>
       )}
 
-      {!result?.ok && (
+      {!result?.ok && !building && (   // while building, the loader is the whole story
         <footer className="relative flex items-center gap-3 border-t bg-background/80 px-4 py-3 backdrop-blur sm:px-8">
-          <button type="button" className={ghost} onClick={() => go(-1)} disabled={step === 0 || building}>
-            <ArrowLeft className="size-4" />Back
+          {/* over the dashboard (app window), Back on the first step returns to it */}
+          <button type="button" className={ghost} onClick={() => (onClose && step === 0 ? onClose() : go(-1))}
+            disabled={step === 0 && !onClose}>
+            <ArrowLeft className="size-4" />{onClose && step === 0 ? 'Dashboard' : 'Back'}
           </button>
           <span className="min-w-0 flex-1 truncate text-center text-xs text-muted-foreground">{hint}</span>
-          {step < STEPS.length - 1 ? (
+          {step < steps.length - 1 ? (
             <button type="button" className={primary} disabled={!canNext} onClick={() => go(1)}>
               {name === 'Spending' && !plan.length ? 'Skip' : 'Next'}<ArrowRight className="size-4" />
             </button>
           ) : (
-            <button type="button" className={primary} disabled={building} onClick={finish}>
-              {building ? <><Loader2 className="size-4 animate-spin" />Building…</> : <>{ADD ? 'Update my dashboard' : 'Build my dashboard'}<ArrowRight className="size-4" /></>}
+            <button type="button" className={primary} onClick={finish}>
+              {add ? 'Update my dashboard' : 'Build my dashboard'}<ArrowRight className="size-4" />
             </button>
           )}
         </footer>
@@ -192,12 +252,12 @@ function Hero({ onStart }: { onStart: () => void }) {
   )
 }
 
-function Statements({ api, st, refresh, onError, onBusy }: {
-  api: Api; st: State | null; refresh: () => Promise<void>; onError: (m: string) => void; onBusy: (n: number) => void
+function Statements({ add, api, st, refresh, onError, onBusy }: {
+  add: boolean; api: Api; st: State | null; refresh: () => Promise<void>; onError: (m: string) => void; onBusy: (n: number) => void
 }) {
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState<string[]>([])
-  const add = async (list: FileList | null) => {
+  const addFiles = async (list: FileList | null) => {
     const pdfs = Array.from(list ?? [])
     const bad = pdfs.filter((f) => !/\.pdf$/i.test(f.name))
     if (bad.length) onError(`${bad.map((f) => f.name).join(', ')}: only PDF statements can be added.`)
@@ -212,25 +272,26 @@ function Statements({ api, st, refresh, onError, onBusy }: {
     onBusy(0)
     await refresh()
   }
-  // The add page lists only what's new or needs a bank picked; older files are summed up in one line.
+  // The add page lists only what's new, or locked with no bank known (pick one to unlock it); the rest, including a
+  // PDF that opens but isn't a statement, is summed up in one line.
   const all = st?.files ?? []
-  const files = ADD ? all.filter((f) => f.uploaded || !f.bank) : all
+  const files = add ? all.filter((f) => f.uploaded || (!f.bank && !f.ok)) : all
   const older = all.length - files.length
   return (
-    <Frame title={ADD ? 'Add new statements' : 'Add your statements'} icon={<Upload className="size-5" />}
-      sub={ADD ? <>Drop the PDFs your bank sent since last time. Supported: {(st?.banks ?? []).map((b) => b.name).join(', ') || '…'}.</>
+    <Frame title={add ? 'Add new statements' : 'Add your statements'} icon={<Upload className="size-5" />}
+      sub={add ? <>Drop the PDFs your bank sent since last time. Supported: {(st?.banks ?? []).map((b) => b.name).join(', ') || '…'}.</>
         : <>PDF statements from your bank, as many as you have. Supported: {(st?.banks ?? []).map((b) => b.name).join(', ') || '…'}.</>}>
       <label onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); add(e.dataTransfer.files) }}
+        onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files) }}
         className={cn('flex cursor-pointer flex-col items-center gap-1.5 rounded-2xl border-2 border-dashed px-4 py-6 text-center transition-colors focus-within:ring-2 focus-within:ring-ring/40',
           over ? 'border-brand bg-brand/10' : 'hover:bg-muted/50')}>
         <Upload className="size-6 text-brand" />
         <span className="text-sm font-medium">Drop PDFs here, or click to choose</span>
         <span className="text-xs text-muted-foreground">They are copied into the Statement/ folder</span>
-        <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" onChange={(e) => { add(e.target.files); e.target.value = '' }} />
+        <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
       </label>
       <ul className="min-h-0 divide-y overflow-y-auto rounded-2xl border" aria-label="Statements">
-        {!files.length && !busy.length && <li className="px-4 py-5 text-center text-sm text-muted-foreground">{ADD ? 'No new statements yet.' : 'No statements yet.'}</li>}
+        {!files.length && !busy.length && <li className="px-4 py-5 text-center text-sm text-muted-foreground">{add ? 'No new statements yet.' : 'No statements yet.'}</li>}
         {files.map((f) => (
           <li key={f.name} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
             {f.bank ? <BankLogo bank={f.bank} size={30} /> : <span className="grid size-[30px] place-items-center rounded-full bg-muted"><FileText className="size-4" /></span>}
@@ -264,7 +325,7 @@ function Statements({ api, st, refresh, onError, onBusy }: {
       </ul>
       {older > 0 && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Check className="size-3.5 text-pos" />{older} statement{older === 1 ? '' : 's'} already in Statement/ will be read again too.
+          <Check className="size-3.5 text-pos" />{older} file{older === 1 ? '' : 's'} already in Statement/ {older === 1 ? 'is' : 'are'} included too.
         </p>
       )}
     </Frame>
@@ -345,11 +406,11 @@ function Unlock({ api, bank, files, saved, refresh }: { api: Api; bank: string; 
 function ThemeStep({ current, pick }: { current: string; pick: (id: string) => void }) {
   return (
     <Frame title="Pick a look" sub="Change it any time with the sun / moon button at the top of the dashboard.">
-      <div className="grid min-h-0 grid-cols-2 gap-3 overflow-y-auto" role="radiogroup" aria-label="Theme">
+      <div className="grid min-h-0 grid-cols-2 gap-3 overflow-y-auto" role="group" aria-label="Theme">
         {THEMES.map((t) => {
           const on = t.id === current
           return (
-            <button key={t.id} type="button" role="radio" aria-checked={on} onClick={() => pick(t.id)}
+            <button key={t.id} type="button" aria-pressed={on} onClick={() => pick(t.id)}
               className={cn('rounded-3xl border p-2 text-left transition hover:shadow-md', on && 'ring-2 ring-brand')}>
               {/* a tiny dashboard drawn with the theme's own tokens */}
               <div className={cn(t.mode, 'rounded-2xl bg-background p-3')} data-theme={t.id} aria-hidden>
@@ -381,7 +442,7 @@ function Spending({ plan, setPlan }: { plan: PlanItem[]; setPlan: (p: PlanItem[]
   const [amount, setAmount] = useState('')
   const [every, setEvery] = useState<PlanItem['every']>('day')
   const amt = Math.max(0, parseFloat(amount) || 0)
-  const month = plan.reduce((a, i) => a + (i.every === 'day' ? i.amount * 30 : i.amount), 0)
+  const month = expectedFor(plan, 30)
   return (
     <Frame title="What do you spend regularly?" sub={<>Optional. Things you pay every day (food, fare) or every month (rent, phone) become the full bar of
       “Spent this month”. You can change them later in the Expected Spending tab.</>}>
@@ -413,7 +474,16 @@ function Spending({ plan, setPlan }: { plan: PlanItem[]; setPlan: (p: PlanItem[]
   )
 }
 
-function Finish({ building, result, retry }: { building: boolean; result: { ok: boolean; log?: string; dashboard?: string } | null; retry: () => void }) {
+function Finish({ add, building, progress, result, retry }: {
+  add: boolean; building: boolean; progress: Progress; result: { ok: boolean; log?: string; dashboard?: string } | null; retry: () => void
+}) {
+  if (building) {
+    return (
+      <Frame title={add ? 'Updating your dashboard' : 'Building your dashboard'} sub="">
+        <Loader p={progress} />
+      </Frame>
+    )
+  }
   if (result?.ok) {
     return (
       <Frame title="Your dashboard is ready" icon={<Check className="size-5" />}
@@ -434,7 +504,7 @@ function Finish({ building, result, retry }: { building: boolean; result: { ok: 
       </Frame>
     )
   }
-  if (ADD) {
+  if (add) {
     return (
       <Frame title="Ready to update" icon={<Check className="size-5" />}
         sub="Reads every statement in Statement/, new ones included, and rebuilds your dashboard.">
@@ -442,7 +512,7 @@ function Finish({ building, result, retry }: { building: boolean; result: { ok: 
           Tired of adding statements by hand? <code className="num">./gmail.sh</code> can fetch them from Gmail by itself
           (README, “Option 2”).
         </p>
-        <p className="text-xs text-muted-foreground">{building ? 'Reading your statements and building the dashboard…' : 'Press “Update my dashboard” when you are ready.'}</p>
+        <p className="text-xs text-muted-foreground">Press “Update my dashboard” when you are ready.</p>
       </Frame>
     )
   }
@@ -464,7 +534,60 @@ function Finish({ building, result, retry }: { building: boolean; result: { ok: 
           </li>
         ))}
       </ol>
-      <p className="text-xs text-muted-foreground">Full guide: README.md, “Option 2: fetch from Gmail automatically”. {building ? 'Reading your statements and building the dashboard…' : 'Press “Build my dashboard” when you are ready.'}</p>
+      <p className="text-xs text-muted-foreground">Full guide: README.md, “Option 2: fetch from Gmail automatically”. Press “Build my dashboard” when you are ready.</p>
     </Frame>
+  )
+}
+
+// What the build is doing, in a word or two. `at` = how full the ring is (reading fills it from 6% to 76% by file).
+const STAGES: Record<string, { label: string; icon: LucideIcon; at: number }> = {
+  start: { label: 'Starting', icon: Sparkles, at: 0.04 },
+  read: { label: 'Reading statements', icon: FileText, at: 0.06 },
+  merge: { label: 'Merging', icon: GitMerge, at: 0.84 },
+  build: { label: 'Building dashboard', icon: LayoutDashboard, at: 0.94 },
+  done: { label: 'Done', icon: Check, at: 1 },
+}
+
+// The build's loader: a ring that fills as statements are read, the stage's icon, a short label. The app window skips
+// animations (main.tsx); this is the one place they play there (finish() switches them on), so the wait reads as work.
+// reducedMotion "never": the window also reports reduced motion (app.py), which would still the spinner.
+function Loader({ p }: { p: Progress }) {
+  const s = STAGES[p.stage] ?? STAGES.start
+  const fill = p.stage === 'read' && p.total ? s.at + 0.7 * (p.done / p.total) : s.at
+  const done = p.stage === 'done'
+  const Icon = s.icon
+  return (
+    <MotionConfig reducedMotion="never">
+      <div className="flex flex-col items-center gap-5 py-6" role="status" aria-live="polite">
+        <div className="relative size-32">
+          <svg viewBox="0 0 120 120" className="absolute inset-0 size-full -rotate-90" aria-hidden>
+            <circle cx="60" cy="60" r="52" fill="none" stroke="var(--muted)" strokeWidth="6" />
+            <motion.circle cx="60" cy="60" r="52" fill="none" strokeWidth="6" strokeLinecap="round"
+              className={cn('transition-[stroke] duration-500', done ? 'stroke-pos' : 'stroke-brand')}
+              initial={{ pathLength: 0 }} animate={{ pathLength: fill }} transition={{ duration: 0.6, ease: EASE }} />
+          </svg>
+          {!done && (
+            <motion.span className="absolute -inset-2 rounded-full border-2 border-transparent border-t-brand/50" aria-hidden
+              animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.4, ease: 'linear' }} />
+          )}
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span key={p.stage} className="absolute inset-0 grid place-items-center" aria-hidden
+              initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 26 }}>
+              <Icon className={cn('size-9', done ? 'text-pos' : 'text-brand')} />
+            </motion.span>
+          </AnimatePresence>
+        </div>
+        <div className="h-12 text-center">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div key={s.label} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2, ease: EASE }}>
+              <p className="text-lg font-medium">{s.label}</p>
+              {p.stage === 'read' && p.total > 0 && <p className="num text-xs text-muted-foreground">{p.done} / {p.total}</p>}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </div>
+    </MotionConfig>
   )
 }

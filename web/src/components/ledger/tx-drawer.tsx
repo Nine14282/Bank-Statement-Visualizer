@@ -68,7 +68,7 @@ export function TxDrawer({ tx, onClose }: { tx: Tx | null; onClose: () => void }
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="eyebrow">Transaction</p>
-                <Typography component="h2" className="display !text-3xl">{tx.date.slice(0, 10)}</Typography>
+                <Typography component="h2" className="display text-3xl">{tx.date.slice(0, 10)}</Typography>
                 <p className="num text-xs text-muted-foreground">{tx.date.slice(11)}</p>
               </div>
               <IconButton aria-label="Close details" onClick={onClose} sx={{ color: 'var(--muted-foreground)' }}><X className="size-4" /></IconButton>

@@ -5,8 +5,8 @@
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
     "types": ["vite/client"],
-    "allowArbitraryExtensions": true,
-    "resolveJsonModule": true,
+    // no JSON imports: the ledger must only enter through the #ledger-data tag, never be bundled (CLAUDE.md)
+    "resolveJsonModule": false,
     "skipLibCheck": true,
 
     /* Bundler mode */

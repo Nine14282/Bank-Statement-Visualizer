@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ComponentProps } from 'react'
-import { animate, motion, useReducedMotion } from 'motion/react'
-import { EASE } from '@/lib/utils'
+import { animate, motion } from 'motion/react'
+import { EASE, useStill } from '@/lib/utils'
 
 // A figure that counts from what it showed last to its new value (0 on first paint). The effect owns the text;
 // render only seeds it, so re-renders mid-count don't fight the animation.
@@ -8,7 +8,7 @@ import { EASE } from '@/lib/utils'
 export function CountUp({ value, format, className }: { value: number; format: (n: number) => string; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null)
   const shown = useRef(0)
-  const still = useReducedMotion()
+  const still = useStill()
   useEffect(() => {
     const c = animate(shown.current, value, {
       duration: still ? 0 : 1.1, ease: EASE,

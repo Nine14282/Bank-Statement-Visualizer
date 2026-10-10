@@ -22,8 +22,8 @@ export function SpendRate() {
   const bad = !from || !to || from > to
   const t = useMemo(() => (bad ? null : rateTable(from, to, cash)), [bad, from, to, cash])
 
-  const line = (label: React.ReactNode, r: RateRow, usual: number | null, total?: boolean) => (
-    <TableRow key={String(label)} className={cn(total && 'border-t-2 font-semibold')}>
+  const line = (k: string, label: React.ReactNode, r: RateRow, usual: number | null, total?: boolean) => (
+    <TableRow key={k} className={cn(total && 'border-t-2 font-semibold')}>
       <TableCell>{label}</TableCell>
       <TableCell className="num text-right">{r.days}</TableCell>
       <TableCell className="num text-right">{baht(r.spend)}</TableCell>
@@ -79,8 +79,8 @@ export function SpendRate() {
             </TableHeader>
             <TableBody>
               {!t && <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">Pick a start date on or before the end date.</TableCell></TableRow>}
-              {t?.months.map((m) => line(<>{m.k}{m.partial && <small className="ml-1 text-muted-foreground">partial</small>}</>, m, t.usual))}
-              {t && line('Whole range', t.total, t.usual, true)}
+              {t?.months.map((m) => line(m.k, <>{m.k}{m.partial && <small className="ml-1 text-muted-foreground">partial</small>}</>, m, t.usual))}
+              {t && line('total', 'Whole range', t.total, t.usual, true)}
             </TableBody>
           </Table>
         </div>

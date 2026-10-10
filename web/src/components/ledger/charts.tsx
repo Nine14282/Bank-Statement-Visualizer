@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useReducedMotion } from 'motion/react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, XAxis, YAxis, type TooltipContentProps } from 'recharts'
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart'
 import { baht, daily, monthLabel, type Summary } from '@/lib/ledger'
+import { useStill } from '@/lib/utils'
 
 const flowConfig = {
   inc: { label: 'Income', color: 'var(--income)' },
@@ -41,7 +41,7 @@ function FlowTip({ active, payload }: TipProps) {
 
 // Smooth income / expense curves per month, soft gradient underneath (the "Overview" chart).
 export function FlowLines({ months }: { months: Summary['months'] }) {
-  const still = useReducedMotion() ?? false
+  const still = useStill()
   return (
     <ChartContainer config={flowConfig} className="aspect-auto h-72 w-full lg:h-80" role="img"
       aria-label={`Monthly income (solid line) and expenses (dashed line), ${months.length} months from ${months[0] ? monthLabel(months[0].m) : '—'}`}>
@@ -80,7 +80,7 @@ function BalanceTip({ active, payload }: TipProps) {
 }
 
 export function BalanceArea({ balance: all }: { balance: Summary['balance'] }) {
-  const still = useReducedMotion() ?? false
+  const still = useStill()
   // one point per day (that day's last balance): same line, a fraction of the SVG nodes and hover targets
   const balance = useMemo(() => [...new Map(all.map((p) => [p.date.slice(0, 10), p])).values()], [all])
   const top = Math.max(1000, Math.ceil(Math.max(...balance.map((p) => p.b), 0) / 1000) * 1000)
@@ -113,7 +113,7 @@ export function BalanceArea({ balance: all }: { balance: Summary['balance'] }) {
 // Money out per day, dashed line at the daily average; the hovered day (else the biggest) is lit and carries a
 // date pill. Pills on edge days align to the bar's outer side so they never leave the card.
 export function DailyBars({ days, avg }: { days: ReturnType<typeof daily>; avg: number }) {
-  const still = useReducedMotion() ?? false
+  const still = useStill()
   const [hot, setHot] = useState<number | null>(null)
   const peak = days.reduce((m, d, i) => (d.out > days[m].out ? i : m), 0)
   const on = hot ?? peak

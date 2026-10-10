@@ -7,10 +7,17 @@ import { PayeeAvatar, Segmented } from '@/components/ledger/widgets'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { OWN, RULES, TX, baht, merchant, payees, ruleFor, rowsFor, saveRules, type Rule, type Tx } from '@/lib/ledger'
+import { OWN, RULES, TX, baht, payeeKey, payees, ruleFor, rowsFor, saveRules, type Rule, type Tx } from '@/lib/ledger'
 import { EASE } from '@/lib/utils'
 
-const keyOf = (t: Tx) => t.label ?? merchant(t.desc)
+// Per label rule: every row containing its text, and how many of them another (more specific) label takes. Module level,
+// not in the render: rules only change by saving, which reloads the page, and this scans the whole ledger per rule.
+const RULE_STATS = RULES.map((r) => {
+  const rows = rowsFor(r)
+  const won = rows.filter((t) => ruleFor(t.desc) === r).length
+  const taker = rows.find((t) => ruleFor(t.desc) !== r)
+  return { r, rows, won, by: taker && ruleFor(taker.desc) }
+})
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 
 // "Custom Your Transaction" tab: every payee (money out) or payer (money in), with the same label editor the
@@ -26,7 +33,7 @@ export function CustomTab() {
   const [sel, setSel] = useState<Tx | null>(null)
   const [selRule, setSelRule] = useState<Rule | undefined>()
   const tx = sel ?? list[0]?.last ?? null
-  const p = tx && all.find((x) => x.key === keyOf(tx))
+  const p = tx && all.find((x) => x.key === payeeKey(tx))
   const labeled = all.filter((x) => x.last.label).length
 
   // Search matches in the other direction, so a payee filed under Money in isn't "missing" while Money out is shown.
@@ -111,7 +118,7 @@ export function CustomTab() {
               <CardContent>
                 <AnimatePresence mode="wait" initial={false}>
                   {tx ? (
-                    <motion.div key={keyOf(tx)} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: EASE }}>
+                    <motion.div key={payeeKey(tx)} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: EASE }}>
                       {p && (
                         <div className="flex items-center gap-3">
                           <PayeeAvatar p={p} size={52} />
@@ -140,12 +147,7 @@ export function CustomTab() {
               {RULES.length > 0 && (
                 <CardContent>
                   <ul className="divide-y">
-                    {RULES.map((r) => {
-                      // every row containing the text, and how many of them another (more specific) label takes
-                      const rows = rowsFor(r)
-                      const won = rows.filter((t) => ruleFor(t.desc) === r).length
-                      const taker = rows.find((t) => ruleFor(t.desc) !== r)
-                      const by = taker && ruleFor(taker.desc)
+                    {RULE_STATS.map(({ r, rows, won, by }) => {
                       return (
                         <li key={r.match} className="flex items-center gap-2 py-2">
                           <button type="button" disabled={!rows.length} onClick={() => pick(rows.find((t) => ruleFor(t.desc) === r) ?? rows[0], r)} title={`Edit “${r.label}”`}

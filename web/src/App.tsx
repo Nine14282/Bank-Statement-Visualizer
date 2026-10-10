@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import LinearProgress from '@mui/material/LinearProgress'
 import { motion } from 'motion/react'
 import { ArrowRight } from 'lucide-react'
@@ -9,7 +9,7 @@ import { InfoTip } from '@/components/ledger/info'
 import { Reveal } from '@/components/ledger/motion'
 import { Predict } from '@/components/ledger/predict'
 import { Nav, TopBar } from '@/components/ledger/shell'
-import { goTo, useActiveSection, type Tab } from '@/lib/nav'
+import { goTo, useActiveSection, useAfterPaint, type Tab } from '@/lib/nav'
 import { usePlan, type PlanItem } from '@/lib/plan'
 import { useTheme } from '@/lib/themes'
 import { Wizard } from '@/components/setup/wizard'
@@ -19,7 +19,7 @@ import { MoneyMovement, MonthSpend, Overview, Payees, RecentTx, Segmented, Walle
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LAST, META, TX, YEARS, bankName, baht, daysBetween, firstName, monthsBack, pctOf, rateTable, summarize, type Tx } from '@/lib/ledger'
-import { EASE, cn } from '@/lib/utils'
+import { APP, ARRIVE, ARRIVE_MS, EASE, cn, endArrival } from '@/lib/utils'
 
 function Recent() {
   const { months, total, usual } = useMemo(() => rateTable(monthsBack(4), LAST, false), [])
@@ -120,7 +120,17 @@ const hello = () => {
 // The tab sits in the URL hash, so the reload after saving a label (saveRules) lands back on the same tab.
 const hashTab = (): Tab => (location.hash === '#custom' ? 'custom' : location.hash === '#plan' ? 'plan' : 'dashboard')
 
-function Ledger({ theme }: { theme: ReturnType<typeof useTheme> }) {
+function Ledger({ theme, onAdd, onSettings, inert }: {
+  theme: ReturnType<typeof useTheme>; onAdd?: () => void; onSettings?: () => void; inert?: boolean
+}) {
+  // Back from an update (ARRIVE): this load plays the entrance (main.tsx) for ARRIVE_MS from now, when the dashboard is
+  // up; a later reload shouldn't replay it.
+  useEffect(() => {
+    if (!ARRIVE) return
+    history.replaceState(null, '', `${location.pathname}?app${location.hash}`)
+    const t = setTimeout(endArrival, ARRIVE_MS)
+    return () => clearTimeout(t)
+  }, [])
   const [tab, setTabState] = useState(hashTab)
   const [year, setYear] = useState('all')
   const [term, setTerm] = useState('')
@@ -134,13 +144,13 @@ function Ledger({ theme }: { theme: ReturnType<typeof useTheme> }) {
   }
 
   return (
-    <div className="relative min-h-svh overflow-x-clip">
+    <div className="relative min-h-svh overflow-x-clip" inert={inert}>
       <div className="pointer-events-none absolute inset-x-0 top-16 h-[44rem] overflow-hidden" aria-hidden>
         <span className="glow top-16 left-1/4 size-96 bg-brand" />
         <span className="glow top-40 right-0 size-80 bg-expense [animation-delay:-7s]" />
       </div>
       <a href="#main" className="sr-only z-50 rounded-full bg-brand px-4 py-2 text-sm text-white focus:not-sr-only focus:fixed focus:top-3 focus:left-3">Skip to content</a>
-      <TopBar rows={rows} year={year} tab={tab} onTab={setTab} theme={theme} />
+      <TopBar rows={rows} year={year} tab={tab} onTab={setTab} theme={theme} onAdd={onAdd} onSettings={onSettings} />
       <main id="main" tabIndex={-1} className="relative mx-auto w-full max-w-[90rem] space-y-10 px-4 pb-28 sm:px-6 md:pb-14 md:pl-24 lg:pr-8">
         {tab === 'dashboard' ? <Dashboard rows={rows} year={year} setYear={setYear} term={term} setTerm={setTerm} plan={plan} onPlan={() => setTab('plan')} />
           : tab === 'plan' ? <PlanTab plan={plan} onPlan={setPlan} />
@@ -153,18 +163,33 @@ function Ledger({ theme }: { theme: ReturnType<typeof useTheme> }) {
   )
 }
 
+// The scroll-spy state lives here, so entering a new section re-renders the two nav rails, not every card and chart.
+function Navs({ mounted }: { mounted: boolean }) {
+  const active = useActiveSection(mounted)
+  return <><Nav active={active} /><Nav active={active} mobile /></>
+}
+
+// Cards whose props don't change while you type in the search box or move between sections: memo skips their charts.
+const OverviewCard = memo(Overview)
+const WalletCard = memo(WalletStack)
+const MoneyCard = memo(MoneyMovement)
+const CategoryList = memo(CategoryCard)
+const SpendRateCard = memo(SpendRate)
+const PredictCard = memo(Predict)
+
 function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
   rows: Tx[]; year: string; setYear: (y: string) => void; term: string; setTerm: (t: string) => void; plan: PlanItem[]; onPlan: () => void
 }) {
-  const active = useActiveSection()
+  // The first paint is the top of the page (greeting, wallet, overview); the rest mounts right after it. Styling the
+  // whole page up front kept the window blank for ~2 s in WebKitGTK.
+  const later = useAfterPaint()
   const s = useMemo(() => summarize(rows), [rows])
   const range = s.n ? `${rows[0].date.slice(0, 10)} to ${rows[rows.length - 1].date.slice(0, 10)}` : 'no transactions'
   const fill = '[&>*]:h-full'
 
   return (
     <>
-      <Nav active={active} />
-      <Nav active={active} mobile />
+      <Navs mounted={later} />
       <section id="overview" className="scroll-mt-20 space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 pt-4">
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease: EASE }}>
@@ -182,31 +207,35 @@ function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
         <Coverage />
 
         <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,27rem)_minmax(0,1fr)] lg:min-h-[34rem]">
-          <Reveal now className={fill}><WalletStack s={s} /></Reveal>
-          <Reveal now className={cn(fill, 'min-w-0')} delay={0.08}><Overview s={s} /></Reveal>
+          <Reveal now className={fill}><WalletCard s={s} /></Reveal>
+          <Reveal now className={cn(fill, 'min-w-0')} delay={0.08}><OverviewCard s={s} /></Reveal>
         </div>
-        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <Reveal className={fill} delay={0.12}><MonthSpend plan={plan} onPlan={onPlan} /></Reveal>
-          <Reveal className={fill} delay={0.18}><Payees rows={rows} onShow={setTerm} /></Reveal>
-        </div>
-        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <Reveal className={fill}><RecentTx rows={rows} /></Reveal>
-          <Reveal className={fill} delay={0.08}><MoneyMovement /></Reveal>
-        </div>
+        {later && <>
+          <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+            <Reveal className={fill} delay={0.12}><MonthSpend plan={plan} onPlan={onPlan} /></Reveal>
+            <Reveal className={fill} delay={0.18}><Payees rows={rows} onShow={setTerm} /></Reveal>
+          </div>
+          <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+            <Reveal className={fill}><RecentTx rows={rows} /></Reveal>
+            <Reveal className={fill} delay={0.08}><MoneyCard /></Reveal>
+          </div>
+        </>}
       </section>
 
-      <section id="categories" className="scroll-mt-20 space-y-4">
-        <h2 className="text-2xl tracking-tight sm:text-3xl">Categories</h2>
-        <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-2 xl:grid-cols-3" data-od-id="category-lists">
-          <Reveal className={fill}><CategoryCard title="Where money went" caption="Expenses by category" list={s.ecat} color="var(--expense)" /></Reveal>
-          <Reveal className={fill} delay={0.06}><CategoryCard title="Where money came from" caption="Income by category" list={s.icat} color="var(--income)" /></Reveal>
-          <Reveal className={fill} delay={0.12}><Recent /></Reveal>
-        </div>
-      </section>
+      {later && <>
+        <section id="categories" className="scroll-mt-20 space-y-4">
+          <h2 className="text-2xl tracking-tight sm:text-3xl">Categories</h2>
+          <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-2 xl:grid-cols-3" data-od-id="category-lists">
+            <Reveal className={fill}><CategoryList title="Where money went" caption="Expenses by category" list={s.ecat} color="var(--expense)" /></Reveal>
+            <Reveal className={fill} delay={0.06}><CategoryList title="Where money came from" caption="Income by category" list={s.icat} color="var(--income)" /></Reveal>
+            <Reveal className={fill} delay={0.12}><Recent /></Reveal>
+          </div>
+        </section>
 
-      <Reveal><SpendRate /></Reveal>
-      <Reveal><Predict /></Reveal>
-      <Reveal><TxTable rows={rows} caption={`${s.n} transactions · ${range}`} term={term} onTerm={setTerm} /></Reveal>
+        <Reveal><SpendRateCard /></Reveal>
+        <Reveal><PredictCard /></Reveal>
+        <Reveal><TxTable rows={rows} caption={`${s.n} transactions · ${range}`} term={term} onTerm={setTerm} /></Reveal>
+      </>}
     </>
   )
 }
@@ -246,6 +275,23 @@ const SETUP = new URLSearchParams(location.search).has('setup')
 
 export default function App() {
   const theme = useTheme()
+  // App window: Add statements (and Settings: the full setup) open over the dashboard, in this same page (no page load,
+  // no transition). The dashboard stays underneath, inert, scroll position kept.
+  const [panel, setPanel] = useState<'add' | 'setup' | null>(null)
+  useEffect(() => {
+    if (!panel) return
+    document.documentElement.style.overflow = 'hidden'   // the page underneath doesn't scroll meanwhile
+    return () => { document.documentElement.style.overflow = '' }
+  }, [panel])
+
   if (SETUP) return <Wizard theme={theme} />
-  return TX.length ? <Ledger theme={theme} /> : <EmptyState />
+  // No data yet: the app window runs the first-time setup itself; a browser tab can only say what to run.
+  if (!TX.length) return APP ? <Wizard theme={theme} mode="setup" /> : <EmptyState />
+  return (
+    <>
+      <Ledger theme={theme} inert={!!panel}
+        onAdd={APP ? () => setPanel('add') : undefined} onSettings={APP ? () => setPanel('setup') : undefined} />
+      {panel && <Wizard theme={theme} mode={panel} onClose={() => setPanel(null)} />}
+    </>
+  )
 }

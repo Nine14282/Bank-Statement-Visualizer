@@ -11,6 +11,7 @@ import { BANKS } from '@/lib/banks'
 import { goTo } from '@/lib/nav'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { KEY } from '@/components/ledger/tx-table'
 import { LAST, bankName, baht, daily, descOf, monthLabel, payees, signed, thisMonth, type Payee, type Summary, type Tx } from '@/lib/ledger'
 import { expectedFor, type PlanItem } from '@/lib/plan'
 import { EASE, cn } from '@/lib/utils'
@@ -20,11 +21,11 @@ export function Segmented<T extends string>({ id, value, onChange, options, big,
   id: string; value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; big?: boolean; label: string; className?: string
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cn('inline-flex flex-wrap gap-1 rounded-full border bg-card p-1', className)}>
+    <div role="group" aria-label={label} className={cn('inline-flex flex-wrap gap-1 rounded-full border bg-card p-1', className)}>
       {options.map((o) => {
         const on = o.value === value
         return (
-          <button key={o.value} type="button" role="radio" aria-checked={on} onClick={() => onChange(o.value)}
+          <button key={o.value} type="button" aria-pressed={on} onClick={() => onChange(o.value)}
             className={cn('relative rounded-full font-medium whitespace-nowrap transition-colors duration-300', big ? 'px-4 py-2 text-sm pointer-coarse:min-h-11' : 'px-3 py-1.5 text-xs pointer-coarse:min-h-11',
               on ? 'text-white' : 'text-muted-foreground hover:text-foreground')}>
             {on && <motion.span layoutId={id} transition={{ type: 'spring', stiffness: 420, damping: 32 }}
@@ -354,7 +355,7 @@ export function RecentTx({ rows }: { rows: Tx[] }) {
       <CardContent>
         <ul className="divide-y">
           {last.map((r, i) => (
-            <motion.li key={`${r.date}${r.amt}${r.desc}`} initial={{ opacity: 0, x: -10 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
+            <motion.li key={KEY.get(r)} initial={{ opacity: 0, x: -10 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
               transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}>
               <button type="button" onClick={() => setOpen(r)}
                 className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl py-2.5 text-left transition-colors hover:bg-muted/60 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:px-1">

@@ -32,7 +32,7 @@ for (const t of TX) {  // applied once at load, so every total, chart and search
 }
 // ponytail: save = reload, so every derived number recomputes; live store if reloading ever feels slow
 export function saveRules(rules: Rule[]) {
-  localStorage.setItem(RULES_KEY, JSON.stringify(rules))
+  try { localStorage.setItem(RULES_KEY, JSON.stringify(rules)) } catch { alert('This browser blocks saving labels.'); return }
   location.reload()
 }
 // KTB marks a payment made after its nightly cut-off (~23:00) with "~ Future Amount: 65 ~ Tran: MORPSW": the

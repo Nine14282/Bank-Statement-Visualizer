@@ -14,7 +14,7 @@ import { TxDrawer } from '@/components/ledger/tx-drawer'
 // New-row highlight. The dashboard hot-reloads (main.tsx), so "new" = not in the set of rows the last page load saw.
 // Rows get a stable key (date|amount|desc, #n for repeats) that is also the React key. First visit highlights nothing.
 const SEEN = 'ledger-seen-rows'
-const KEY = new Map<Tx, string>()
+export const KEY = new Map<Tx, string>()
 const count = new Map<string, number>()
 for (const t of TX) {
   const k = `${t.date}|${t.amt}|${t.desc}`
@@ -24,6 +24,7 @@ for (const t of TX) {
 }
 const FRESH = (() => {
   try {
+    if (!TX.length) return new Set<string>()   // empty ledger: don't record "no rows seen", or the first real load marks every row new
     const old = localStorage.getItem(SEEN)
     localStorage.setItem(SEEN, JSON.stringify([...KEY.values()]))
     if (!old) return new Set<string>()
@@ -89,11 +90,13 @@ export function TxTable({ rows, caption, term, onTerm }: { rows: Tx[]; caption: 
     setSort((s) => (s.key === key ? { key, dir: (-s.dir) as 1 | -1 } : { key, dir: key === 'desc' || key === 'cat' ? 1 : -1 }))
 
   const head = (k: Key, children: string, opts: { num?: boolean; hide?: boolean } = {}) => (
-    <TableHead key={k} className={cn('cursor-pointer select-none whitespace-nowrap font-mono text-[11px] font-semibold uppercase tracking-[0.08em]',
+    <TableHead key={k} className={cn('select-none whitespace-nowrap font-mono text-[11px] font-semibold uppercase tracking-[0.08em]',
       opts.num && 'text-right', opts.hide && 'hidden lg:table-cell')}
-      aria-sort={sort.key === k ? (sort.dir < 0 ? 'descending' : 'ascending') : undefined} onClick={() => click(k)}>
-      {children}
-      {sort.key === k && (sort.dir < 0 ? <ArrowDown className="ml-1 inline size-3" /> : <ArrowUp className="ml-1 inline size-3" />)}
+      aria-sort={sort.key === k ? (sort.dir < 0 ? 'descending' : 'ascending') : undefined}>
+      <button type="button" onClick={() => click(k)} className="cursor-pointer uppercase tracking-[inherit]">
+        {children}
+        {sort.key === k && (sort.dir < 0 ? <ArrowDown className="ml-1 inline size-3" /> : <ArrowUp className="ml-1 inline size-3" />)}
+      </button>
     </TableHead>
   )
 
@@ -205,8 +208,7 @@ export function TxTable({ rows, caption, term, onTerm }: { rows: Tx[]; caption: 
               siblingCount={desktop ? 1 : 0} boundaryCount={1}
               sx={{ '& .MuiPaginationItem-root': { color: 'var(--foreground)', borderColor: 'var(--border)', fontFamily: 'var(--font-mono)', borderRadius: '9999px' },
                 '& .MuiPaginationItem-root:hover': { bgcolor: 'var(--muted)' },
-                // !important: MUI injects PaginationItem's own selected style outside the css layer, so it beats a layered rule
-                '& .MuiPaginationItem-root.Mui-selected': { bgcolor: 'var(--brand) !important', color: '#fff !important', fontWeight: 600 } }} />
+                '& .MuiPaginationItem-root.Mui-selected': { bgcolor: 'var(--brand)', color: '#fff', fontWeight: 600 } }} />
           </nav>
         )}
       </CardContent>

@@ -5,7 +5,7 @@ import IconButton from '@mui/material/IconButton'
 import Popover from '@mui/material/Popover'
 import MuiTooltip from '@mui/material/Tooltip'
 import { motion } from 'motion/react'
-import { Bell, CircleCheck, Download, Moon, Sun } from 'lucide-react'
+import { Bell, Check, CircleCheck, Copy, Download, Moon, Settings, Sun, Upload } from 'lucide-react'
 import { SECTIONS, goTo, type Tab } from '@/lib/nav'
 import { THEMES, type useTheme } from '@/lib/themes'
 import { META, bankName, baht, toCsv, type Tx } from '@/lib/ledger'
@@ -43,6 +43,61 @@ function download(rows: Tx[], name: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
 
+// Top-bar popovers share one card look.
+const POP = { mt: 1, maxWidth: 'calc(100vw - 24px)', p: 2, borderRadius: '18px', bgcolor: 'var(--popover)',
+  color: 'var(--popover-foreground)', border: '1px solid var(--border)' }
+
+// The command to add statements. Opened from disk (file:///…/web/dist/index.html), the project folder is in this
+// page's own address, so the hint says exactly what to type; anywhere else (dev server, a WSL host) just ./run.sh.
+const runCmd = () => {
+  const p = decodeURIComponent(location.pathname)
+  const end = /\/web\/dist\/index\.html$/
+  if (location.protocol !== 'file:' || location.host || !end.test(p)) return './run.sh'
+  return `cd '${p.replace(end, '').replace(/'/g, `'\\''`)}' && ./run.sh`
+}
+
+// "Add statements": in the app window (workspace/app.py) it opens the add page over the dashboard (onAdd, App.tsx;
+// the window's Python reads and saves the PDFs). In a browser this dashboard is a file, which can't save PDFs or read
+// them, so it says what to run: ./run.sh opens the add page, and this page reloads itself after the update.
+function AddStatements({ onAdd }: { onAdd?: () => void }) {
+  const [at, setAt] = useState<HTMLElement | null>(null)
+  const [copied, setCopied] = useState(false)
+  const cmd = runCmd()
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(cmd); setCopied(true) } catch { /* no clipboard here: the text is selectable */ }
+  }
+  return (
+    <>
+      <button type="button" aria-label="Add statements" aria-haspopup={onAdd ? undefined : 'dialog'}
+        onClick={(e) => { if (onAdd) return onAdd(); setCopied(false); setAt(e.currentTarget) }}
+        data-od-id="add-statements"
+        className="flex h-11 items-center gap-2 rounded-full bg-brand px-3.5 text-sm font-medium text-white shadow-[0_8px_20px_-8px_var(--brand)] transition hover:brightness-110 active:scale-95 sm:px-4">
+        <Upload className="size-4" /><span className="hidden sm:inline">Add statements</span>
+      </button>
+      <Popover open={!!at} anchorEl={at} onClose={() => setAt(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }} slotProps={{ paper: { sx: { ...POP, width: 380 } } }}>
+        <p className="eyebrow mb-2">Add statements</p>
+        <p className="text-sm text-muted-foreground">
+          Got a new statement PDF from your bank? Run this in a terminal. A page opens where you drop the PDF and type its
+          password, then this dashboard updates by itself.
+        </p>
+        <div className="mt-3 flex items-center gap-2 rounded-xl border bg-muted/50 p-1.5 pl-3">
+          <code className="num min-w-0 flex-1 select-all break-all text-xs">{cmd}</code>
+          <button type="button" onClick={copy} aria-label="Copy command"
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground">
+            {copied ? <Check className="size-4 text-pos" /> : <Copy className="size-4" />}
+          </button>
+          <span role="status" className="sr-only">{copied ? 'Command copied' : ''}</span>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Rather have them added automatically? <code className="num">./gmail.sh</code> fetches statements from Gmail
+          (README, “Option 2”).
+        </p>
+      </Popover>
+    </>
+  )
+}
+
 const initials = (s: string) => s.split(/\s+/).filter((w) => !/^(mr|mrs|ms|miss)\.?$/i.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
 
 // `short` is shown below lg, where three full labels don't fit beside the buttons.
@@ -55,12 +110,12 @@ const TABS: { id: Tab; label: string; short: string }[] = [
 // Top-level page tabs; the lit pill slides between them. Wraps onto its own row on phones.
 function Tabs({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   return (
-    <nav role="tablist" aria-label="Pages" data-od-id="top-tabs"
+    <nav aria-label="Pages" data-od-id="top-tabs"
       className="order-last flex w-full gap-1 rounded-full border bg-card p-1 shadow-sm md:order-none md:w-auto">
       {TABS.map((t) => {
         const on = t.id === tab
         return (
-          <button key={t.id} type="button" role="tab" aria-selected={on} onClick={() => onTab(t.id)}
+          <button key={t.id} type="button" aria-current={on ? 'page' : undefined} onClick={() => onTab(t.id)}
             aria-label={t.label} className={cn('relative flex-1 rounded-full px-3 py-2 text-sm sm:px-4 font-medium whitespace-nowrap transition-colors duration-300 md:flex-none',
               on ? 'text-white' : 'text-muted-foreground hover:text-foreground')}>
             {on && <motion.span layoutId="top-tab" transition={{ type: 'spring', stiffness: 400, damping: 32 }}
@@ -74,8 +129,9 @@ function Tabs({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   )
 }
 
-export function TopBar({ rows, year, tab, onTab, theme: [theme, pickTheme] }: {
-  rows: Tx[]; year: string; tab: Tab; onTab: (t: Tab) => void; theme: ReturnType<typeof useTheme>
+export function TopBar({ rows, year, tab, onTab, theme: [theme, pickTheme], onAdd, onSettings }: {
+  rows: Tx[]; year: string; tab: Tab; onTab: (t: Tab) => void; theme: ReturnType<typeof useTheme>; onAdd?: () => void
+  onSettings?: () => void   // app window only: the full setup again (theme, expected spending, passwords)
 }) {
   // the button steps to the next theme in the registry (with two themes: light <-> dark)
   const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
@@ -90,10 +146,16 @@ export function TopBar({ rows, year, tab, onTab, theme: [theme, pickTheme] }: {
       <span className="grid size-11 shrink-0 place-items-center rounded-full bg-foreground text-lg text-background md:absolute md:left-4" aria-hidden>฿</span>
       <Tabs tab={tab} onTab={onTab} />
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <AddStatements onAdd={onAdd} />
         <button type="button" onClick={() => download(rows, `ledger-${year}.csv`)}
           className="hidden h-11 items-center gap-2 rounded-full border bg-card px-4 text-sm font-medium transition hover:bg-muted active:scale-95 sm:flex">
           <Download className="size-4" />Export CSV
         </button>
+        {onSettings && (
+          <MuiTooltip title="Settings">
+            <IconButton aria-label="Settings" onClick={onSettings} sx={icon} data-od-id="settings"><Settings className="size-[18px]" /></IconButton>
+          </MuiTooltip>
+        )}
         <MuiTooltip title={issues ? `${issues} coverage issue${issues > 1 ? 's' : ''}` : 'Coverage OK'}>
           <IconButton aria-label="Data coverage" onClick={(e) => setBell(e.currentTarget)} sx={icon} data-od-id="coverage-status">
             <Badge color="error" variant="dot" invisible={!issues} overlap="circular"><Bell className="size-[18px]" /></Badge>
@@ -101,8 +163,7 @@ export function TopBar({ rows, year, tab, onTab, theme: [theme, pickTheme] }: {
         </MuiTooltip>
         <Popover open={!!bell} anchorEl={bell} onClose={() => setBell(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
           transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          slotProps={{ paper: { sx: { mt: 1, width: 340, maxWidth: 'calc(100vw - 24px)', p: 2, borderRadius: '18px', bgcolor: 'var(--popover)',
-            color: 'var(--popover-foreground)', border: '1px solid var(--border)' } } }}>
+          slotProps={{ paper: { sx: { ...POP, width: 340 } } }}>
           <p className="eyebrow mb-2">Data coverage</p>
           {!issues && <p className="flex items-center gap-2 text-sm text-pos"><CircleCheck className="size-4" />No gaps — every month and balance lines up.</p>}
           <ul className="space-y-2 text-sm">
