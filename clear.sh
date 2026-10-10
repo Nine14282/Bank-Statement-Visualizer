@@ -21,6 +21,6 @@ echo "Will delete (if present):"; printf '  %s\n' "${files[@]}"
 if [ $yes = 0 ]; then read -rp "Continue? [y/N] " r; [[ $r == [yY]* ]] || { echo "Cancelled."; exit 0; }; fi
 
 rm -rf -- "${files[@]}"   # -r: workspace/.cache is a folder (parsed statements)
-[ -x .venv/bin/python ] || { echo "Cleared. Run ./setup.sh to rebuild the blank dashboard." >&2; exit 0; }
+[ -x .venv/bin/python ] || { echo "Cleared. Run ./install.sh to rebuild the blank dashboard." >&2; exit 0; }
 .venv/bin/python workspace/build_dashboard.py
 echo "Cleared. Dashboard is empty."

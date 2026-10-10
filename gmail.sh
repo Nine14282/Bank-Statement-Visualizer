@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 umask 077   # files we create (ledger, token, dashboard, settings) are readable by you only
 
-[ -x .venv/bin/python ] || { echo "Not set up yet. Run ./setup.sh first." >&2; exit 1; }
+[ -x .venv/bin/python ] || { echo "Not set up yet. Run ./install.sh first." >&2; exit 1; }
 mkdir -p Statement
 
 .venv/bin/python workspace/fetch_gmail.py "$@"

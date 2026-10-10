@@ -24,11 +24,11 @@ printf '\n%sStatement Visualizer%s\n\n' "$B" "$N"
 # (a new package such as pywebview) reinstalls here instead of leaving the old venv to fail quietly.
 if [ ! -x .venv/bin/python ]; then
   say "First run: installing what it needs (Python packages). This happens once and takes about a minute."
-  SV_FROM_RUN=1 ./setup.sh   # it opens the app itself unless run from here
+  SV_NO_OPEN=1 ./setup.sh   # this script opens the app itself, so setup must not
   echo
 elif ! cmp -s requirements.txt .venv/requirements.installed; then
   say "Updating the Python packages (requirements changed). This takes about a minute."
-  SV_FROM_RUN=1 ./setup.sh
+  SV_NO_OPEN=1 ./setup.sh
   echo
 fi
 

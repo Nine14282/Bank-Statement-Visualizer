@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup (safe to re-run): Python venv + packages, settings file. No Node.js needed: the dashboard page
+# One-time setup (safe to re-run; ./install.sh is the friendly front door): Python venv + packages, settings file. No Node.js needed: the dashboard page
 # ships prebuilt (web/prebuilt/index.html) and Python fills in your data.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -76,7 +76,7 @@ Categories=Office;Finance;
 DESK
       ok "App menu: search \"Statement Visualizer\" (to remove: rm $desk)"
     elif [ ! -t 0 ]; then
-      echo "  (No terminal to ask, so no app-menu launcher. Run ./setup.sh in a terminal to add it.)"
+      echo "  (No terminal to ask, so no app-menu launcher. Run ./install.sh in a terminal to add it.)"
     fi
     .venv/bin/python -c "import webview.platforms.gtk" 2>/dev/null ||
       echo "  (No app window here, so the launcher opens your browser. For the window, Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1)" ;;
@@ -96,9 +96,9 @@ No app window possible here? ./run.sh opens the same pages in your browser inste
 Updating from an older version? Run one update (Add statements, Update) so the ledger gets the new Bank column.
 MSG
 
-# Open the app now (the first-time setup runs in it), unless ./run.sh called this (it opens the app itself) or nobody
-# is at the terminal. Detached: this terminal can be closed.
-if [ -t 0 ] && [ -z "${SV_FROM_RUN:-}" ]; then
+# Open the app now (the first-time setup runs in it), unless ./install.sh or ./run.sh called this (SV_NO_OPEN: the
+# first installs only, the second opens the app itself) or nobody is at the terminal. Detached: this terminal can be closed.
+if [ -t 0 ] && [ -z "${SV_NO_OPEN:-}" ]; then
   say "Opening the app"
   nohup ./run.sh --app >/dev/null 2>&1 &
 fi
