@@ -63,6 +63,20 @@ The library is Motion (`motion/react`), wrapped in `<MotionConfig reducedMotion=
   (18s drift).
 - **Reduced motion:** every CSS animation has a `prefers-reduced-motion` off-switch, and every chart has
   `isAnimationActive={!still}`. Animate transforms and opacity only.
+- **Desktop app window:** no animation. `workspace/app.py` opens the page with `?app` (`main.tsx` then sets
+  `MotionGlobalConfig.skipAnimations`) and asks WebKitGTK for reduced motion (CSS keyframes and charts). WebKitGTK
+  stutters on the entrances; the browser keeps everything. Hover colour transitions stay. Add statements opens the add
+  page over the dashboard in the same page (`App.tsx`, no page load, no transition); Dashboard closes it the same way.
+  Settings (gear, top bar) opens the full setup the same way, minus its Welcome screen. With no data yet the window
+  shows the full setup itself (the browser shows the No data yet page instead).
+  Exceptions, all around an update:
+  - **Loader** (`wizard.tsx`): ring filling per statement read, stage icon, one- or two-word label (Starting, Reading
+    statements, Merging, Building dashboard, Done).
+  - **Finale** (`wizard.tsx`, Web Animations API): on Done the add page's content fades to its bare background (400ms)
+    and the page reloads with `?app&updated`.
+  - **Entrance** (`ARRIVE`, `lib/utils.ts`): that load plays the full entrance for `ARRIVE_MS` (3s from when the dashboard mounts): Motion on with
+    reduced motion ignored (`main.tsx`), charts and count-ups via `useStill()` (`lib/utils.ts`), CSS
+    via `.arriving` (`.tick`, and `appear` on the top bar and nav rail). Then the window is still again.
 
 ## Color
 
@@ -126,8 +140,9 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 | **Geist Mono** (variable) | `--font-mono`, `.num`, `.eyebrow`, `.pill` | every number, date and count (`.num` = tabular nums); labels |
 | **Outfit** (variable, latin) | `--font-display` = `--font-heading`, `.display`, `h1`, `h2`, `CardTitle` | headings and headline figures |
 
-- **Thai:** no Thai face is bundled. Body text falls back to `"Noto Sans Thai", "Sarabun", system-ui`. Geist and
-  Outfit are latin-only, so Thai bank descriptions render in that fallback.
+- **Thai:** no Thai face is bundled. Geist, Geist Mono and Outfit are latin-only, so every stack names
+  `'Noto Sans Thai'` right after them, before the generic family (a generic name ends the list; leaving Thai to the
+  system's fallback search slowed the first paint in WebKitGTK). Without Noto Sans Thai the system's own Thai font is used.
 - `.display`: weight 400, `-0.025em`, lining + tabular nums. Use it for big money figures.
 - `.eyebrow`: mono 12px / 600, uppercase, `0.1em` tracking, muted. Use it for small labels above figures, in
   tooltips and in drawers.
@@ -150,7 +165,7 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 |---|---|
 | Build | Vite 8 + `vite-plugin-singlefile` → one self-contained page with no data, `web/prebuilt/index.html` (committed); `workspace/build_dashboard.py` writes the ledger into its `#ledger-data` tag → `web/dist/index.html`. Users need no Node |
 | UI | React 19, TypeScript 6 |
-| Styling | Tailwind v4, CSS-first (`@theme inline` in `index.css`, no `tailwind.config`), `tw-animate-css`, `cn()` = clsx + tailwind-merge |
+| Styling | Tailwind v4, CSS-first (`@theme inline` in `index.css`, no `tailwind.config`), `cn()` = clsx + tailwind-merge |
 | Components | shadcn/ui (CLI v4 run on demand via `npx shadcn@latest`; its CSS vendored as `src/shadcn.css`), style `base-nova` on **Base UI** (`@base-ui/react`, not Radix), base colour neutral, `class-variance-authority` |
 | Extra components | MUI 9 + Emotion, for pieces shadcn lacks here (below) |
 | Motion | Motion 14 (`motion/react`) |
@@ -158,10 +173,13 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 | Icons | `lucide-react` only |
 | Lint / types | `oxlint`, `tsc -b` (no UI tests) |
 
-- **CSS layering:** the first line of `index.css` is `@layer theme, base, mui, components, utilities`, and `main.tsx`
-  wraps the app in `<StyledEngineProvider enableCssLayer>`. MUI therefore sits below Tailwind utilities, and a class
-  beats MUI's own style. Exception: MUI Pagination's selected item needs `!important` (`tx-table.tsx`).
-- **Dark class:** MUI uses `colorSchemeSelector: 'class'`, so it owns the `.dark`/`.light` class on `<html>`. Tailwind
+- **CSS layering:** `main.tsx` wraps the app in `<StyledEngineProvider enableCssLayer>` and renders
+  `<GlobalStyles styles="@layer properties, theme, base, mui, components, utilities;" />` first. MUI's sheet lands in
+  `<head>` before Tailwind's, so the order must be declared there (an order line in `index.css` is not enough). MUI
+  therefore sits below Tailwind preflight and utilities, and a class beats MUI's own style without `!important`. Keep
+  hand-written helper classes (`.num`, `.display`, `.eyebrow`, `.pill`) inside `@layer components`: unlayered CSS beats
+  every utility.
+- **Dark class:** MUI uses `colorSchemeSelector: 'class'`, so it owns the `.dark`/`.light` class on `<html>`. `ThemeProvider` has `noSsr storageManager={null}`: the class is set on the first render and `ledger-theme` (`themes.ts`) is the only saved theme (no `mui-mode` copy). Tailwind
   reads it via `@custom-variant dark (&:is(.dark *))`. The theme is applied before first paint in `main.tsx`.
 - **Styling MUI:** use `sx`/`slotProps` with CSS vars (`bgcolor: 'var(--card)'`, `border: '1px solid var(--border)'`).
   Don't use MUI palette colours for surfaces.
@@ -181,6 +199,9 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 - **`TopBar`** (`shell.tsx`) is sticky, `bg-background/80 backdrop-blur-md`. It holds:
   - the ฿ mark (a round `bg-foreground text-background` badge);
   - page `Tabs`, a pill with a sliding brand background;
+  - Add statements, the one brand pill (icon only below `sm`). It opens a `Popover` with the `./run.sh` command
+    (with the project folder worked out from the page's `file://` address) and a copy button, because a page
+    opened from disk can't take PDFs itself;
   - Export CSV, an outline pill;
   - a coverage bell (MUI `IconButton` + `Badge` dot + `Popover`, radius 18px);
   - a theme toggle that steps through `THEMES`;
@@ -257,7 +278,7 @@ These live in `charts.tsx`.
 ### Installed shadcn components
 
 Only the ones in use are kept: `badge`, `button`, `card`, `chart`, `input`, `table`, `toggle-group` (+ `toggle`,
-which it imports) and `tooltip`. The nav and page tabs are custom, so don't add shadcn `Sidebar` / `Tabs`. Before
+which it imports). Tooltips are MUI's. The nav and page tabs are custom, so don't add shadcn `Sidebar` / `Tabs`. Before
 adding any other shadcn component, check that `index.css` still has the tokens it uses: the `sidebar-*` and
 `chart-1`…`chart-5` tokens were removed.
 
