@@ -22,7 +22,7 @@ statement PDFs. See [Install](#install) and [Get started](#get-started).
 | **OS** | **Linux** (tested). **macOS**: written for but untested, so expect rough edges (a fresh Mac's system Python is often 3.9, so install Python 3.10+ from Homebrew or python.org first). **Windows**: not supported; WSL is untested and the app window may not open there. |
 | **Python** | 3.10 or newer, with `venv`. Debian/Ubuntu: `sudo apt install python3 python3-venv`. |
 | **Internet** | for the first install (pip downloads 3 packages and their dependencies) and for the optional Gmail download. Nothing else is ever sent anywhere. |
-| **App window** (Linux, optional) | `sudo apt install python3-gi gir1.2-webkit2-4.1`. Already there on Ubuntu desktops. Without them everything works in your browser instead. macOS needs nothing extra. |
+| **App window** (Linux, optional) | `sudo apt install python3-gi gir1.2-webkit2-4.1`. Already there on Ubuntu desktops. Without them everything works in your browser instead (or install with `./install.sh --web`). macOS needs nothing extra. |
 | **Node.js** | not needed. Only if you edit the dashboard's source (see the end). |
 
 ## Install
@@ -30,20 +30,26 @@ statement PDFs. See [Install](#install) and [Get started](#get-started).
 ```bash
 git clone https://github.com/Nine14282/Income-and-Expenses-Dashboard.git
 cd Income-and-Expenses-Dashboard
-./install.sh
+./install.sh          # the app window (default)
+./install.sh --web    # or: browser only, no app window
 ```
+
+Two ways to use it, pick one (you can switch later by running the other command): the **app** gets its own window
+and an app-menu entry; **browser only** skips the window and the extra package for it, and `./run.sh` opens the same
+pages in your browser. Re-running `./install.sh` with no flag keeps whichever you chose.
 
 That is the whole install: it gets the app onto your computer and **does not open it**. It takes about a minute and
 needs the internet. It:
 
 1. checks Python 3.10+;
-2. creates a private Python environment in `.venv/` and installs `requirements.txt` into it (on Linux the environment
-   can also see the system's `python3-gi`, which the app window needs);
+2. creates a private Python environment in `.venv/` and installs `requirements.txt` into it (app mode also installs
+   `requirements-app.txt`, and on Linux the environment can also see the system's `python3-gi`, which the app window
+   needs);
 3. creates `Statement/` (put your PDFs here) and a private `.env` settings file from `.env.example` (readable by you
    only);
 4. builds an empty dashboard page;
-5. **Linux**: asks *Add Statement Visualizer to your app menu? [Y/n]* (the default is yes; it only writes a
-   `.desktop` file under `~/.local/share/applications/`). **macOS**: writes `Statement Visualizer.command` in the
+5. app mode only: **Linux** asks *Add Statement Visualizer to your app menu? [Y/n]* (the default is yes; it only writes a
+   `.desktop` file under `~/.local/share/applications/`). **macOS** writes `Statement Visualizer.command` in the
    project folder, to double-click.
 
 When it finishes it tells you how to open the app (next section). Re-running `./install.sh` is safe: it keeps your
@@ -92,10 +98,10 @@ transaction table**, plus a warning if a month of statements looks missing.
   theme, expected spending, passwords). On Linux the window keeps its own labels, expected spending and theme (in
   `workspace/.app/`), apart from any browser's; on macOS it uses the system web view's own store.
 
-**No app window?** Without the system web view, `./run.sh` opens the same setup and add-statements pages in your
+**No app window?** Installed with `./install.sh --web`, or without the system web view, `./run.sh` opens the same setup and add-statements pages in your
 browser instead. If the tab doesn't open on its own, go to the one-time link `./run.sh` printed
-(`http://127.0.0.1:…/?setup=…`) and leave that terminal open while you use the page. `./run.sh --setup` opens the full
-setup in the browser again.
+(`http://127.0.0.1:…/?setup=…`) and leave that terminal open while you use the page. `./run.sh --web` skips the window on an
+app install; `./run.sh --setup` opens the full setup in the browser again.
 
 ### Updating and resetting
 
@@ -250,14 +256,16 @@ You never need these to use the app; they are here for reference.
 
 | Command | What it does |
 |---|---|
-| `./install.sh` | installs the app (see [Install](#install)); safe to re-run |
+| `./install.sh` | installs the app window (see [Install](#install)); safe to re-run |
+| `./install.sh --web` | installs for the browser only: no app window package, no menu entry |
 | `./uninstall.sh` | removes it again (see [Uninstall](#uninstall)) |
 | `./run.sh` | opens the app, the same as the menu entry; on a fresh clone it installs first |
+| `./run.sh --web` | opens the browser pages instead of the app window |
 | `./run.sh --setup` | the full first-time setup again, in your browser |
 | `./run.sh --rebuild` | rebuilds from the PDFs in `Statement/` in the terminal, no window (also what cron gets) |
 | `./gmail.sh` | downloads new statements from Gmail, then rebuilds (Option 2) |
 | `./clear.sh` | resets all your data and settings to a fresh-install state, keeping the app (see [Updating and resetting](#updating-and-resetting)) |
-| `./setup.sh` | the install step itself, which `./install.sh` and `./run.sh` call; running it directly also opens the app afterwards |
+| `./setup.sh` | the install step itself, which `./install.sh` and `./run.sh` call (`--app` / `--web` like `./install.sh`); running it directly also opens the app afterwards |
 
 ## Where things are
 
