@@ -12,75 +12,7 @@
 #                                 in the terminal if needed). Also what runs when nobody is at the terminal (a script)
 #   KTB_PW=... KBANK_PW=... ./run.sh --rebuild   or keep the passwords in .env (the pages can save them there)
 #   ./run.sh --password=...       rebuild with this password (visible in shell history)
-set -euo pipefail
-cd "$(dirname "$0")"
-umask 077   # files we create (ledger, token, dashboard, settings) are readable by you only
-
-# Progress lines: "▸ step" (bold violet on a terminal). Every slow step says what it does first.
-if [ -t 1 ]; then B=$'\033[1;35m'; N=$'\033[0m'; else B= N=; fi
-say() { printf '%s▸%s %s\n' "$B" "$N" "$*"; }
-
-printf '\n%sStatement Visualizer%s\n\n' "$B" "$N"
-setup=0; rebuild=0; app=0; web=0; args=()
-for a in "$@"; do
-  case "$a" in
-    --setup) setup=1 ;;
-    --rebuild) rebuild=1 ;;
-    --app) app=1 ;;
-    --web) web=1 ;;
-    *) args+=("$a") ;;   # e.g. --password=...: means a terminal rebuild
-  esac
-done
-# .venv/mode is written by setup.sh (app or web; ./install.sh --web = browser only, no pywebview).
-# .venv/requirements.installed is copied by setup.sh after a good install: an update that changes the requirements
-# files (a new package such as pywebview) reinstalls here instead of leaving the old venv to fail quietly.
-if [ -r .venv/mode ]; then mode=$(cat .venv/mode); elif [ "$web" = 1 ]; then mode=web; else mode=app; fi
-reqs=(requirements.txt); [ "$mode" = app ] && reqs+=(requirements-app.txt)
-if [ ! -x .venv/bin/python ]; then
-  say "First run: installing what it needs (Python packages). This happens once and takes about a minute."
-  SV_NO_OPEN=1 ./setup.sh "--$mode"   # this script opens the app itself, so setup must not
-  echo
-elif ! cat "${reqs[@]}" | cmp -s - .venv/requirements.installed; then
-  say "Updating the Python packages (requirements changed). This takes about a minute."
-  SV_NO_OPEN=1 ./setup.sh "--$mode"
-  echo
-fi
-if [ "$app" = 1 ] && [ "$mode" = web ]; then
-  echo "Installed without the app window. Run ./install.sh --app to add it (or ./run.sh for the browser)." >&2
-  exit 1
-fi
-
-# The app (launcher, or a person at the terminal): the dashboard, or the first-time setup with no ledger yet; it adds
-# statements and changes settings itself. Exit 3 = no window possible here: the browser pages below instead.
-if [ "$setup" = 0 ] && [ "$rebuild" = 0 ] && [ "$web" = 0 ] && [ "$mode" = app ] && [ ${#args[@]} -eq 0 ] && { [ "$app" = 1 ] || [ -t 0 ]; }; then
-  .venv/bin/python workspace/build_dashboard.py >/dev/null   # always: a pull may bring a newer page, settings may change
-  say "Opening the app"
-  code=0; .venv/bin/python workspace/app.py || code=$?
-  # 3 = app.py found no window possible; 134 = Qt aborted anyway (a platform plugin app.py's check didn't foresee)
-  [ "$code" = 3 ] || [ "$code" = 134 ] || exit "$code"
-  say "No app window here (see README); using the browser instead"
-  if [ "$app" = 1 ] && [ -f workspace/ledger.csv ]; then   # the launcher: just show the dashboard
-    exec .venv/bin/python -c 'import pathlib, sys, webbrowser; webbrowser.open(pathlib.Path(sys.argv[1]).resolve().as_uri())' \
-      web/dist/index.html
-  fi
-fi
-if [ "$setup" = 1 ] || [ ! -f workspace/ledger.csv ]; then
-  if [ "$setup" = 1 ]; then say "Opening the setup page (--setup)"; else say "No ledger yet: opening the setup page"; fi
-  exec .venv/bin/python workspace/welcome.py
-fi
-# No app window: a person at the terminal gets the add-statements page; --rebuild, --password= or a script with no terminal rebuild here.
-if [ "$rebuild" = 0 ] && [ ${#args[@]} -eq 0 ] && [ -t 0 ]; then
-  say "Opening the page to add new statements (./run.sh --rebuild skips it)"
-  exec .venv/bin/python workspace/welcome.py --add
-fi
-
-mkdir -p Statement
-if ! ls Statement/*.pdf >/dev/null 2>&1; then
-  echo "No PDFs in Statement/. Run ./run.sh to add statements on a page, or copy them there and run ./run.sh --rebuild." >&2
-  exit 1
-fi
-
-say "Reading the statements in Statement/ and rebuilding your ledger"
-.venv/bin/python workspace/update_statement.py ${args[@]+"${args[@]}"}
-echo
-say "Done. Dashboard: double-click Dashboard.html in $PWD"
+#
+# The work is done by workspace/launcher.py, the same on Windows (run.cmd).
+command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
+exec python3 "$(dirname "$0")/workspace/launcher.py" run "$@"

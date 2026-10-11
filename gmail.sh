@@ -7,12 +7,7 @@
 #   ./gmail.sh --listen           keep running: fetch + build within seconds of new mail (Pub/Sub; README "Real time")
 # --listen is the only automatic fetch (nothing runs on a schedule). It has nobody to type PDF passwords: put
 # KTB_PW / KBANK_PW in .env first, and run ./gmail.sh once by hand to authorise.
-set -euo pipefail
-cd "$(dirname "$0")"
-umask 077   # files we create (ledger, token, dashboard, settings) are readable by you only
-
-[ -x .venv/bin/python ] || { echo "Not set up yet. Run ./install.sh first." >&2; exit 1; }
-mkdir -p Statement
-
-.venv/bin/python workspace/fetch_gmail.py "$@"
-echo "Dashboard: double-click Dashboard.html in $PWD"
+#
+# The work is done by workspace/launcher.py, the same on Windows (gmail.cmd).
+command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
+exec python3 "$(dirname "$0")/workspace/launcher.py" gmail "$@"
