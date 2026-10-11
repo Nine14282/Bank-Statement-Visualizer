@@ -10,6 +10,8 @@ instead of the dashboard (web/src/components/setup/wizard.tsx), and answers its 
   POST /api/upload?name=X    body = one PDF: saved into Statement/, its bank detected
   POST /api/remove           {name}: delete a file uploaded in this session (never an older one)
   POST /api/bank             {name, bank}: the user says which bank a file is from
+  POST /api/gmail            download new statements (and payment notices) from Gmail into Statement/; the first
+                             time it opens Google's sign-in in the browser. Offered only when the Google keys are set
   POST /api/password         {bank, password, remember}: opens and parses that bank's locked files with it
   POST /api/finish           {theme, plan}: save the choices (each only if sent), build the ledger + dashboard,
                              open it, stop
@@ -108,6 +110,7 @@ def state() -> dict:
         "banks": [{"id": b.id, "name": b.name, "saved": b.id in SAVED} for b in BANKS],
         "files": [{"name": n, **f} for n, f in FILES.items()],
         "theme": os.environ.get("THEME", ""),
+        "gmail": bool(os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")),
         "plan": plan,
     }
 
@@ -133,6 +136,20 @@ def upload(raw_name: str, data: bytes) -> dict:
     bank = BY_ID[FILES[name]["bank"]].name if FILES[name]["bank"] else "bank not recognised yet"
     note(f"added {name} ({bank})")
     return {"name": name, **FILES[name]}
+
+
+def gmail() -> dict:
+    import fetch_gmail                 # Google's libraries load on the first press, not at every start
+    say("Fetching new statements from Gmail…")
+    try:
+        got, notices = fetch_gmail.pull(interactive=True)
+    except (SystemExit, OSError) as e:  # no keys / sign-in refused, network or Gmail API error
+        raise ValueError(f"Gmail: {e}") from e
+    scan(quiet=True)
+    for path in got:                   # new this session: listed on the add page like an upload
+        FILES[os.path.basename(path)]["uploaded"] = True
+    note(f"{len(got)} new statement(s), {notices} payment notice(s)")
+    return {"files": len(got), "notices": notices}
 
 
 def unlock(bank: str, password: str, remember: bool) -> dict:
@@ -241,6 +258,8 @@ def handle(path: str, name: str, body: bytes, server=None) -> dict | None:
             raise ValueError("Unknown file or bank.")
         FILES[name]["bank"] = bank
         return {"ok": True}
+    if path == "/api/gmail":
+        return gmail()
     if path == "/api/password":
         return unlock(str(data.get("bank", "")), str(data.get("password", "")), bool(data.get("remember")))
     if path == "/api/finish":

@@ -2,7 +2,7 @@ import kbank from '@/assets/kbank.webp'
 import krungthai from '@/assets/krungthai.webp'
 
 // Bank display info: the dashboard's name, card colour and logo for each bank id (the ledger's Bank column).
-// Adding a bank = one entry here; reading its statements is the BANKS registry in workspace/extract_ledger.py.
+// Adding a bank = one entry here; reading its statements is the BANKS registry in workspace/banks/.
 // Card colours are deep enough for white text (>= 4.5:1); `full`: the logo is already a round badge.
 export type BankInfo = { name: string; skin?: string; img?: string; badge?: string; full?: boolean }
 

@@ -12,7 +12,7 @@ Everything stays on your machine; nothing is uploaded. Open the resulting
 web/dist/index.html in any browser (works offline).
 
 Encrypted PDFs are unlocked on the fly. Each bank has its own password setting (BANKS in
-extract_ledger.py: KTB_PW, KBANK_PW). Each file tries no password, then its own bank's setting (by
+banks/: KTB_PW, KBANK_PW). Each file tries no password, then its own bank's setting (by
 file name; KBank files are named STM_..., Gmail downloads add an 8-character message-id prefix),
 then every other bank's, then --password= / ones typed this run, then an interactive prompt
 (asked once and reused for every encrypted file).
@@ -38,7 +38,8 @@ from pdfplumber.utils.exceptions import PdfminerException
 
 import build_dashboard
 import config  # loads the project's env settings (KTB_PW, KBANK_PW, ...) into os.environ
-from extract_ledger import BANKS, bank_from_name, extract, write_csv
+from banks import manual_bank
+from extract_ledger import BANKS, BY_ID, bank_from_name, extract, write_csv
 from txid import differences, stamp_ids
 
 # Anchor paths to this script's folder so it runs from any working directory.
@@ -46,9 +47,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
 ROOT = os.path.dirname(HERE)                         # project root
 
 # Parsed rows per PDF, so an update only reads statements it hasn't read before (re-reading all 9 took ~40 s). An entry
-# is keyed by the file's bytes plus everything else that shapes its rows: the parser code, the pdfplumber version and
-# the reference-number settings categorize() reads; change any and the file is read again. It holds transactions like
-# ledger.csv: private (0600), git-ignored, deleted by clear.sh; entries no PDF uses any more go after each good run.
+# is keyed by the file's bytes plus everything else that shapes its rows: the parser code (extract_ledger.py + banks/),
+# the pdfplumber version and the reference-number settings categorize() reads; change any and the file is read again.
+# It holds transactions like ledger.csv: private (0600), git-ignored, deleted by clear.sh; entries no PDF uses any
+# more go after each good run.
 CACHE = os.path.join(HERE, ".cache")
 USED: set[str] = set()      # entries this run used (the rest are pruned)
 CACHE_SETTINGS = ("LEDGER_CASH_REF", "LEDGER_PEER_REF", "LEDGER_STOCK_REF")
@@ -80,7 +82,8 @@ def why(e):
 
 
 def cache_entry(path) -> str:
-    parts = [open(path, "rb").read(), open(os.path.join(HERE, "extract_ledger.py"), "rb").read(),
+    code = [os.path.join(HERE, "extract_ledger.py"), *sorted(glob.glob(os.path.join(HERE, "banks", "*.py")))]
+    parts = [open(path, "rb").read(), *(open(f, "rb").read() for f in code),
              pdfplumber.__version__.encode(), *(os.environ.get(k, "").encode() for k in CACHE_SETTINGS)]
     key = hashlib.sha256(b"".join(hashlib.sha256(p).digest() for p in parts)).hexdigest()[:40]
     USED.add(key)
@@ -137,7 +140,7 @@ def read_pdf(path):
             return extract(path, pw)
         except PdfminerException as e:   # pdfplumber wraps every open/decrypt failure in this: wrong or missing
             errors.append(e)             # password. Anything else is a parser problem: let it reach main()'s SKIP
-    if not sys.stdin.isatty():      # cron / watcher: nobody to ask. Stop rather than write a ledger missing this file.
+    if not sys.stdin.isatty():      # the Gmail listener / a script: nobody to ask. Stop rather than write a ledger missing this file.
         keys = " / ".join(b.passwords[0] for b in BANKS)
         sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
                  "in the env settings (see .env.example), run ./run.sh --setup, or run this by hand to type it. "
@@ -249,12 +252,15 @@ def main(progress=None) -> int:
                       "and a numeric Amount")
                 continue
             extra.append(r)
-        for r in extra:   # payment emails come from Krungthai NEXT; anything else was typed by hand
-            r["Bank"] = "KTB" if "(email)" in r["Description"] else "Manual"
+        for r in extra:
+            r["Bank"] = manual_bank(r)
         extra = stamp_ids(extra)
-        added = 0
+        added = early = 0
         stmt = list(merged)          # statement rows only (before any manual row is added)
         claimed = set()              # statement rows already matched to a manual row
+        first = {}                   # each bank's earliest statement row
+        for s in stmt:
+            first[s.get("Bank")] = min(first.get(s.get("Bank"), s["Date"]), s["Date"])
         when = lambda r: datetime.fromisoformat(r["Date"])   # time is optional
         for r in extra:
             if r["ID"] in by_id:     # the bank statement already has it
@@ -262,26 +268,32 @@ def main(progress=None) -> int:
                 print(f"  manual entry skipped, already in a statement: {r['Date']}  "
                       f"{float(r['Amount']):+,.2f}  {r['Description']}")
                 continue
-            if "(email)" in r["Description"]:
-                # Payment-notice emails carry the payment time, but the statement can post bills minutes to
-                # hours later. Same amount within 4h of a not-yet-matched statement row = same transaction.
-                # "Future Amount" rows are payments made after KTB's nightly cut-off (~23:00), posted ~01:30-02:30
-                # the next day: they get 6h so a late-evening notice still finds its statement row.
-                # ponytail: fixed windows, 1:1 greedy; widen/narrow if bills post later/earlier than that
-                hit = next((s for s in stmt if s["ID"] not in claimed and s.get("Bank") == "KTB"
+            if r["Bank"] != "Manual":   # a payment email (fetch_gmail): its bank's statement row wins
+                if r["Date"] < first.get(r["Bank"], "9999"):
+                    # Older than that bank's statements (K PLUS mail goes back years): no statement to check it
+                    # against, no income beside it, and a transfer in from your other bank would count twice.
+                    early += 1
+                    continue
+                # Payment emails carry the payment time, but the statement can post it later: same amount within the
+                # bank's notice_window of a not-yet-matched statement row = same transaction.
+                # ponytail: fixed windows, 1:1 greedy; widen/narrow per bank if payments post later/earlier than that
+                window = BY_ID[r["Bank"]].notice_window if r["Bank"] in BY_ID else lambda s: (4, False)
+                hit = next((s for s in stmt if s["ID"] not in claimed and s.get("Bank") == r["Bank"]
                             and float(s["Amount"]) == float(r["Amount"])
-                            and abs(when(s) - when(r)) <= timedelta(hours=6 if "Future Amount" in s["Description"] else 4)), None)
+                            and abs(when(s) - when(r)) <= timedelta(hours=window(s)[0])), None)
                 if hit:
                     claimed.add(hit["ID"])
                     print(f"  notice matched to statement row, skipped: {r['Date']}  {float(r['Amount']):+,.2f}  "
                           f"(statement {hit['Date']})")
-                    if "Future Amount" in hit["Description"]:
-                        # The statement prints when the bank posted it (~01:48 next day); the notice says when it was
-                        # paid. Keep the paid time. Amount, balance and ID stay the statement's.
+                    if window(hit)[1]:
+                        # The statement prints when the bank posted it (e.g. ~01:48 next day); the email says when it
+                        # was paid. Keep the paid time. Amount, balance and ID stay the statement's.
                         hit["Date"] = r["Date"]
                     continue
             by_id[r["ID"]] = r; merged.append(r); added += 1
         print(f"  manual entries: {added} added of {len(extra)}")
+        if early:
+            print(f"  {early} payment email(s) left out: older than that bank's first statement row")
 
     if not merged:
         # Never overwrite a good ledger.csv with nothing.
@@ -324,6 +336,9 @@ def selfcheck():
     until the file or a setting changes; pruning keeps only what the run used."""
     import tempfile
     global CACHE, read_pdf
+    assert [manual_bank({"Description": d}) for d in ("Bill / purchase (email) SHOP", "K PLUS Transfer out (email) X",
+                                                      "K PLUS lunch")] == ["KTB", "KBANK", "Manual"]   # pre-Bank-column rows
+    assert manual_bank({"Description": "Transfer out (email) X", "Bank": "KBANK"}) == "KBANK"
     real_cache, real_read, reads = CACHE, read_pdf, []
 
     def fake_read(path):

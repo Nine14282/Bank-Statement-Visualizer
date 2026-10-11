@@ -24,7 +24,7 @@ def load_env() -> None:
         key, sep, value = line.removeprefix("export ").partition("=")
         value = value.strip()
         if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":   # one matching pair, so a quoted
-            value = value[1:-1]                                              # GMAIL_QUERY keeps its inner quotes
+            value = value[1:-1]                                              # value keeps its inner quotes
         if sep and value:
             os.environ.setdefault(key.strip(), value)
 

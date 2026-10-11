@@ -10,6 +10,7 @@ Usage: python build_dashboard.py      (python build_dashboard.py --selfcheck: th
 """
 import csv
 import datetime
+import hashlib
 import itertools
 import json
 import os
@@ -137,21 +138,39 @@ def build(csv_path: str = CSV) -> None:
     except OSError:
         sys.exit(f"Missing {SHELL}: it ships with the project. Restore it (git checkout web/prebuilt) or, if you "
                  "changed the web app, run `npm install && npm run build` in web/ (needs Node.js 20+).")
+    # Which build of the app's own code this is: an open page swaps in new data, but reloads when this differs from
+    # the one it was loaded with (an update of the app itself). stamp: this build, also in version.js and data.js.
+    page = hashlib.sha256(shell.encode()).hexdigest()[:12]
+    stamp = int(time.time() * 1000)
+    payload["meta"]["page"], payload["meta"]["build"] = page, stamp
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tmp = OUT + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(inject(shell, payload))
     os.replace(tmp, OUT)    # an open dashboard tab never reloads into a half-written file
-    # An open dashboard polls this file (a <script>, which works from file:// where fetch doesn't) and reloads
-    # when the number changes.
+    # An open app window is told to update (app.py, from the Gmail listener's output) and then reads version.js and
+    # data.js (by <script>, which works from file:// where fetch doesn't), swapping the new data in without a reload.
+    # data.js goes first, whole, so a changed version.js always finds it complete. Both carry the same stamp: a
+    # data.js left behind by an older builder doesn't match, and the page reloads instead.
+    tmp = os.path.join(os.path.dirname(OUT), "data.js.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(data_js(payload, stamp))
+    os.replace(tmp, os.path.join(os.path.dirname(OUT), "data.js"))
     with open(os.path.join(os.path.dirname(OUT), "version.js"), "w", encoding="utf-8") as f:
-        f.write(f"window.__BUILD={int(time.time() * 1000)}")
-    # ponytail: a forwarder, not a copy: the page stays at OUT, so its version.js polling and saved browser
+        f.write(f'window.__BUILD={stamp};window.__PAGE="{page}"')
+    # ponytail: a forwarder, not a copy: the page stays at OUT, so its live updates and saved browser
     # settings (localStorage) keep working. No data in it.
     with open(LINK, "w", encoding="utf-8") as f:
         f.write('<!doctype html><meta charset="utf-8"><title>Statement Visualizer</title>'
                 '<script>location.replace("web/dist/index.html")</script>\n')
     print(f"Wrote {OUT}  ({os.path.getsize(OUT):,} bytes); open it with {LINK}")
+
+
+def data_js(payload, stamp=0) -> str:
+    """dist/data.js: the ledger as a script (JSON is valid JavaScript). Loaded by <script src>, so no HTML parsing:
+    the '<' escaping inject() needs isn't required, but it's kept so the file never holds a literal tag either."""
+    return ("window.__LEDGER=" + json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
+            + f";window.__LEDGER_BUILD={int(stamp)};")
 
 
 def inject(shell: str, payload) -> str:
@@ -174,6 +193,9 @@ def selfcheck():
     assert "<" not in body, body
     assert json.loads(body) == evil
     assert page.count("<script") == 2, page
+    js = data_js(evil, 7)
+    body, _, tail = js.removeprefix("window.__LEDGER=").rpartition(";window.__LEDGER_BUILD=")
+    assert "<" not in js and json.loads(body) == evil and tail == "7;", js
     print("selfcheck ok")
 
 
