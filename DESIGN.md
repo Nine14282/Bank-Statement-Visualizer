@@ -13,7 +13,8 @@ changes, update this file to match. Read it before you add or restyle a screen.
   screen from theme tokens.
 - **One page, many sections.** The dashboard scrolls through `SECTIONS` (`lib/nav.ts`: overview, categories,
   spend-rate, predict, transactions). Each is an element with an `id` and `scroll-mt-20`, and a scroll-spy lights
-  the nav. Top-level pages (Dashboard / Expected Spending / Custom) are tabs kept in the URL hash (`#plan`,
+  the nav. Below Overview, each section's heading sits outside its cards: a section `h2` (with its `InfoTip`) and a
+  one-line muted description, then the card(s) with content only. Top-level pages (Dashboard / Expected Spending / Custom) are tabs kept in the URL hash (`#plan`,
   `#custom`).
 - **Explain every number.** Put an `InfoTip` ("?") beside any metric that isn't obvious, and a one-sentence
   plain-English summary above each chart ("You spend ฿X a month on average…"). Offer a table view as the alternative
@@ -59,14 +60,17 @@ The library is Motion (`motion/react`), wrapped in `<MotionConfig reducedMotion=
 - **Swaps:** use `AnimatePresence mode="wait"`. Chart views use a 0.15s fade; wizard steps slide x ±24px over 0.25s.
 - **Micro-interactions:** `hover:-translate-y-0.5` on round links, `active:scale-95` on buttons, and brighten on hover
   (`hover:brightness-110`).
-- **CSS keyframes** (in `index.css`): `.tick` (segmented bar fill), `.tx-new` (new-row highlight), `.hero-glow`
+- **CSS keyframes** (in `index.css`): `.bar-in` (filled bar grows from the left), `.tx-new` (new-row highlight), `.hero-glow`
   (18s drift).
 - **Reduced motion:** every CSS animation has a `prefers-reduced-motion` off-switch, and every chart has
   `isAnimationActive={!still}`. Animate transforms and opacity only.
 - **Desktop app window:** no animation. `workspace/app.py` opens the page with `?app` (`main.tsx` then sets
-  `MotionGlobalConfig.skipAnimations`) and asks WebKitGTK for reduced motion (CSS keyframes and charts). WebKitGTK
-  stutters on the entrances; the browser keeps everything. Hover colour transitions stay. Add statements opens the add
-  page over the dashboard in the same page (`App.tsx`, no page load, no transition); Dashboard closes it the same way.
+  `MotionGlobalConfig.skipAnimations`) and asks the web view for reduced motion (CSS keyframes and charts; on Linux
+  Qt's Chromium, via `--force-prefers-reduced-motion`). Chosen when the window was WebKitGTK, which stuttered on the
+  entrances; the browser keeps everything. Hover colour transitions stay. Add statements opens the add
+  page over the dashboard in the same page (`App.tsx`, no page load, no transition); Dashboard (or Esc, except while
+  uploading or building) closes it the same way. Text is selectable and Ctrl+wheel zooms, as in a tab (`app.py`). The window starts in the --background of the
+  theme mode the page showed last (`themes.ts` tells `app.py`), so there's no flash of the other theme.
   Settings (gear, top bar) opens the full setup the same way, minus its Welcome screen. With no data yet the window
   shows the full setup itself (the browser shows the No data yet page instead).
   Exceptions, all around an update:
@@ -76,7 +80,7 @@ The library is Motion (`motion/react`), wrapped in `<MotionConfig reducedMotion=
     and the page reloads with `?app&updated`.
   - **Entrance** (`ARRIVE`, `lib/utils.ts`): that load plays the full entrance for `ARRIVE_MS` (3s from when the dashboard mounts): Motion on with
     reduced motion ignored (`main.tsx`), charts and count-ups via `useStill()` (`lib/utils.ts`), CSS
-    via `.arriving` (`.tick`, and `appear` on the top bar and nav rail). Then the window is still again.
+    via `.arriving` (`.bar-in`, and `appear` on the top bar and nav rail). Then the window is still again.
 
 ## Color
 
@@ -202,7 +206,8 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
   - Add statements, the one brand pill (icon only below `sm`). It opens a `Popover` with the `./run.sh` command
     (with the project folder worked out from the page's `file://` address) and a copy button, because a page
     opened from disk can't take PDFs itself;
-  - Export CSV, an outline pill;
+  - Export CSV, an outline pill (in the app window it saves through `app.py`'s save dialog: pywebview turns page
+    downloads off);
   - a coverage bell (MUI `IconButton` + `Badge` dot + `Popover`, radius 18px);
   - a theme toggle that steps through `THEMES`;
   - an initials `Avatar` on `var(--brand)`.
@@ -244,7 +249,9 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 - **Labels and badges:** outline `Badge` for categories; `.pill` for step numbers and tags; a `late-night` chip as a
   small `rounded-full border` span.
 - **Progress:**
-  - the tick bar in `MonthSpend`: 48 rounded ticks, today's tick outlined;
+  - the bar in `MonthSpend`: one filled bar (`h-3.5`, full = the month's expected spending) with a `w-1` foreground
+    line ringed in the card colour at "expected by today" (labelled under it); fill past the line is `--neg`, and the
+    pill and sentence give the amount over, or saved (`--pos`);
   - thin category bars (`h-1`, `scaleX`, fading opacity down the list);
   - MUI `LinearProgress` (4px, `sx` colours from tokens).
 - **Tables:** shadcn `Table` in a `rounded-lg border` wrapper, mono-caps headers, right-aligned `.num` cells.

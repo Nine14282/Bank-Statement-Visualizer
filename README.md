@@ -21,8 +21,8 @@ statement PDFs. See [Install](#install) and [Get started](#get-started).
 |---|---|
 | **OS** | **Linux** (tested). **macOS**: written for but untested, so expect rough edges (a fresh Mac's system Python is often 3.9, so install Python 3.10+ from Homebrew or python.org first). **Windows**: not supported; WSL is untested and the app window may not open there. |
 | **Python** | 3.10 or newer, with `venv`. Debian/Ubuntu: `sudo apt install python3 python3-venv`. |
-| **Internet** | for the first install (pip downloads 3 packages and their dependencies) and for the optional Gmail download. Nothing else is ever sent anywhere. |
-| **App window** (Linux, optional) | `sudo apt install python3-gi gir1.2-webkit2-4.1`. Already there on Ubuntu desktops. Without them everything works in your browser instead (or install with `./install.sh --web`). macOS needs nothing extra. |
+| **Internet** | for the first install (pip downloads a few packages and their dependencies) and for the optional Gmail download. Nothing else is ever sent anywhere. |
+| **App window** (Linux, optional) | Qt's web view (PyQt6), installed by pip into `.venv/`: a ~200 MB download, ~550 MB on disk. On an X11 desktop (not Wayland) also `sudo apt install libxcb-cursor0`. Without it everything works in your browser instead (or install with `./install.sh --web`, which skips the download). macOS needs nothing extra. |
 | **Node.js** | not needed. Only if you edit the dashboard's source (see the end). |
 
 ## Install
@@ -38,13 +38,12 @@ Two ways to use it, pick one (you can switch later by running the other command)
 and an app-menu entry; **browser only** skips the window and the extra package for it, and `./run.sh` opens the same
 pages in your browser. Re-running `./install.sh` with no flag keeps whichever you chose.
 
-That is the whole install: it gets the app onto your computer and **does not open it**. It takes about a minute and
-needs the internet. It:
+That is the whole install: it gets the app onto your computer and **does not open it**. It takes about a minute (a few
+minutes for the app window on Linux) and needs the internet. It:
 
 1. checks Python 3.10+;
 2. creates a private Python environment in `.venv/` and installs `requirements.txt` into it (app mode also installs
-   `requirements-app.txt`, and on Linux the environment can also see the system's `python3-gi`, which the app window
-   needs);
+   `requirements-app.txt`: pywebview, and on Linux PyQt6 with its web view);
 3. creates `Statement/` (put your PDFs here) and a private `.env` settings file from `.env.example` (readable by you
    only);
 4. builds an empty dashboard page;
@@ -96,9 +95,11 @@ transaction table**, plus a warning if a month of statements looks missing.
   to `web/dist/index.html`.
 - **Inside the app**: **Add statements** (top bar) for new PDFs, and the gear for settings (the same steps again:
   theme, expected spending, passwords). On Linux the window keeps its own labels, expected spending and theme (in
-  `workspace/.app/`), apart from any browser's; on macOS it uses the system web view's own store.
+  `workspace/.app/`), apart from any browser's; on macOS it uses the system web view's own store. It reopens at the
+  size you left it (Linux), **Export CSV** asks where to save the file, **Esc** closes Add statements or Settings, and only one window opens at a time (a second
+  launch just says it's already open).
 
-**No app window?** Installed with `./install.sh --web`, or without the system web view, `./run.sh` opens the same setup and add-statements pages in your
+**No app window?** Installed with `./install.sh --web`, or Qt's web view can't open here, `./run.sh` opens the same setup and add-statements pages in your
 browser instead. If the tab doesn't open on its own, go to the one-time link `./run.sh` printed
 (`http://127.0.0.1:…/?setup=…`) and leave that terminal open while you use the page. `./run.sh --web` skips the window on an
 app install; `./run.sh --setup` opens the full setup in the browser again.
@@ -128,7 +129,7 @@ local part for you:
 ./uninstall.sh -n        # only list what would be removed (add -y to skip the "Continue?" question)
 ```
 
-It cannot remove your cron line or the access you gave Google (steps 3 and 4 below); it reminds you. To do it by
+It cannot remove a listener service or the access you gave Google (steps 3 and 4 below); it reminds you. To do it by
 hand instead, or to see what the script does, follow these steps in order:
 
 1. **Keep what you want first.** Deleting the folder also deletes your statement PDFs (`Statement/`), the ledger
@@ -139,8 +140,9 @@ hand instead, or to see what the script does, follow these steps in order:
    - **Linux**: `rm ~/.local/share/applications/statement-visualizer.desktop` (under `$XDG_DATA_HOME/applications/`
      if you set that).
    - **macOS** (untested): the launcher is `Statement Visualizer.command` inside the folder, so step 5 removes it.
-3. **Stop the schedule**, if you set up the unattended Gmail download: run `crontab -e` and delete the
-   `./gmail.sh` line.
+3. **Stop the listener service**, if you made one: `systemctl --user disable --now statement-gmail`, then delete
+   `~/.config/systemd/user/statement-gmail.service`. (An older install may also have a `./gmail.sh` line in
+   `crontab -e`; delete it.)
 4. **Revoke the Gmail access**, if you used Option 2: open <https://myaccount.google.com/permissions>, pick the app
    name you gave your Google Cloud project, and choose *Remove access*. You can also delete that project in the
    [Google Cloud console](https://console.cloud.google.com/). Deleting the folder removes the saved login
@@ -155,8 +157,10 @@ hand instead, or to see what the script does, follow these steps in order:
      `Dashboard.html` page. Clear it in the browser's site-data settings if you opened the dashboard in a browser.
    - On macOS the app window keeps the same settings in the system web view's own store (on Linux they were in
      `workspace/.app/`, which step 5 removed).
-   - Packages you installed with `apt` yourself (`python3-venv`, `python3-gi`, `gir1.2-webkit2-4.1`) are general
-     system packages and are left alone. Remove them only if nothing else uses them.
+   - Linux: the app window's small web view folders, `~/.cache/statement-visualizer` and
+     `~/.local/share/statement-visualizer` (`./uninstall.sh` removes them).
+   - Packages you installed with `apt` yourself (`python3-venv`, `libxcb-cursor0`) are general system packages and are
+     left alone. Remove them only if nothing else uses them.
 
 ## Option 1: add statements yourself
 
@@ -165,14 +169,14 @@ hand instead, or to see what the script does, follow these steps in order:
    - **Passwords**: only if a file needs one you haven't saved; tick *Remember* to never be asked again.
    - **Update my dashboard**: new statements are read (ones read before come from `workspace/.cache/`) and the
      dashboard comes back with them.
-2. That's it. An open dashboard tab reloads by itself after the rebuild.
+2. That's it. (A dashboard already open in another browser tab doesn't change by itself: reload it.)
 
 Forgot the command? In a browser tab (not the app window), the dashboard's **Add statements** button shows it, with
 your project folder filled in and a copy button.
 
 No browser (a server over SSH, or you just copied files into `Statement/` by hand)? `./run.sh --rebuild`
 rebuilds in the terminal (it needs at least one PDF in `Statement/` and an existing ledger, so do the first run
-through the app or `./run.sh` first). Runs with nobody at the terminal (cron) do that automatically.
+through the app or `./run.sh` first). Run from a script, with nobody at the terminal, `./run.sh` does the same.
 
 **PDF password** (bank PDFs are usually encrypted). KTB and KBank use different passwords:
 `KTB_PW` and `KBANK_PW`. The bank of each file is read from the PDF's own text when it can be opened, else from the
@@ -193,9 +197,10 @@ statements are fine.
 ## Option 2: fetch from Gmail automatically
 
 `./gmail.sh` finds statement emails, downloads new PDFs into `Statement/`, then builds the
-dashboard. It only asks Gmail for **read-only** access and never changes your mailbox. By default it looks for
-Krungthai's statement emails only: for KBank (or to restrict the sender, see below) set `GMAIL_QUERY` in `.env` to
-your bank's real address, for example `from:<bank sender address> has:attachment filename:pdf`.
+dashboard. It only asks Gmail for **read-only** access and never changes your mailbox. It imports only the
+banks' own emails, matched by sender and subject (fixed per bank in `workspace/banks/`, not a setting): Krungthai
+statements from `noreply@krungthai.com` ("ส่งรายการเดินบัญชีเงินฝาก") and KBank statements from
+`K-ElectronicDocument@kasikornbank.com` ("E-statement for saving account").
 
 It also reads Krungthai NEXT "payment done" emails (from `noreply@krungthai.com`, containing `แจ้งผลการ…`: bill,
 transfer, PromptPay). These have no PDF and no balance, so each becomes a row
@@ -203,6 +208,11 @@ in `workspace/manual_entries.csv` and shows up before the monthly statement does
 arrives, the matching Krungthai statement row (same amount within 4 hours, 6 for payments made after the bank's
 nightly cut-off) wins and the email row is dropped.
 Outgoing payments only: incoming money has no email, so it appears with the next statement.
+KBank's K PLUS "Result of … (Success)" emails (from `KPLUS@kasikornbank.com`: bill and shop payments, transfers,
+PromptPay) are read the same way and matched against KBank statement rows. Their rows start with `K PLUS`.
+A payment email older than its bank's first statement row is left out of the ledger, because there is no statement to
+check it against (K PLUS keeps years of them). It stays in `manual_entries.csv` and is matched if you add that older
+statement later.
 
 One-time Google setup (about 5 minutes):
 
@@ -216,23 +226,85 @@ One-time Google setup (about 5 minutes):
 6. Run `./gmail.sh`. A browser opens once so you can approve read-only access. The login is
    cached in `workspace/token.json`.
 
+Once the keys are in `.env`, the "add statements" page (`./run.sh`, or Add statements in the app) also shows a
+**Fetch from Gmail** button: it does the same download into `Statement/`, then you press Update as usual.
+
 Notes:
 - While the consent screen is in *Testing*, Google expires the login after **7 days**; run `./gmail.sh` by hand
-  and it opens the browser again (a scheduled run with nobody there stops with "Gmail login missing or expired"
+  and it opens the browser again (the listener, with nobody there, stops with "Gmail login missing or expired"
   instead of hanging). Switching the consent screen to *In production* avoids
   that for your own account; Google then shows an "unverified app" warning that you can click
   through, because Gmail read access is a restricted scope and you are not submitting the app
   for verification.
-- **Restrict the sender (recommended).** The default search matches Krungthai's statement email
-  *subject* from any sender, so anyone could email you a fake statement PDF with that subject and it
-  would be merged into your ledger. Set `GMAIL_QUERY` in `.env` to your bank's real address (look at
-  an old statement email), for example `from:<bank sender address> has:attachment filename:pdf`.
+- Only the banks' own sender addresses are searched, so a stranger can't mail a fake statement into your ledger.
   `./gmail.sh` prints the sender of every PDF it downloads so you can check.
 - Work or university Google accounts may block third-party apps. Use a personal Gmail if so.
-- **Unattended**: set `KTB_PW` and `KBANK_PW` in `.env` (nobody can type it), run `./gmail.sh` once by
-  hand so the login exists, then schedule it, for example hourly with `crontab -e`:
-  `0 * * * * cd /path/to/this/folder && ./gmail.sh >> ~/statement-gmail.log 2>&1` (keep the log outside the project
-  folder: it lists the senders and amounts it found)
+- `./gmail.sh` is a command you run when you want. For new mail to come in **by itself**, set up the real-time
+  listener below: it is the only automatic fetch (nothing runs on a schedule). It reads new PDFs with nobody there to
+  type a password, so set `KTB_PW` and `KBANK_PW` in `.env` (or tick *Remember* on the setup page).
+
+### Real time: Gmail push (optional)
+
+`./gmail.sh --listen` keeps running and fetches within seconds of a new email, both statement
+PDFs and payment notices, exactly as `./gmail.sh` does. Gmail posts every inbox change to a Google Cloud Pub/Sub
+topic and the listener pulls from it, so your computer needs no public address. It only searches the last 7 days of
+mail: what arrived while it was off is fetched when it starts, unless it was off longer than that (then run
+`./gmail.sh` once, which searches everything). It does need the computer on, and it adds a few Google Cloud steps on top of the setup
+above:
+
+1. **APIs & Services → Library**: enable **Cloud Pub/Sub API**. Google may ask you to link a billing account; the
+   usage stays inside the free tier (see *Cost* below).
+2. **Pub/Sub → Topics → Create topic**, for example `gmail-push`. Untick *Add a default subscription*.
+3. Open the topic → **Permissions → Add principal** `gmail-api-push@system.gserviceaccount.com` with the role
+   **Pub/Sub Publisher**. (A work or university organisation may refuse this; use a project under a personal Gmail.)
+4. **Pub/Sub → Subscriptions → Create**: pick that topic, delivery type **Pull**, message retention **1 day**, and
+   leave *Retain acknowledged messages* off.
+5. **Google Auth Platform → Data Access → Add scope** `https://www.googleapis.com/auth/pubsub`.
+6. In `.env`, set `GOOGLE_PROJECT_ID`, `GMAIL_TOPIC` (the topic ID) and `GMAIL_SUBSCRIPTION` (the subscription ID).
+7. Run `./gmail.sh --listen` in a terminal. The browser asks you to sign in again, because the login now includes
+   Pub/Sub; then it prints `Listening for new mail`. Send yourself an email to see it react. Ctrl+C stops it.
+
+After that, **the app starts it for you**. With `GMAIL_TOPIC` set, opening the app (the menu entry or `./run.sh`) runs
+the listener in the background until you close the window. A fetch or rebuild still in progress finishes first.
+When it has fetched something, the open window shows the new rows straight away (they slide in): the listener tells
+the app, nothing polls. A dashboard in a browser tab is not told: reload it.
+Its output goes to `workspace/.app/gmail-listen.log`. It cannot open a browser, so if the login expires it stops and
+logs "Gmail login missing or expired": sign in again with `./gmail.sh` or the **Fetch from Gmail** button. Only one
+listener runs at a time, so the app and the service below never both listen. While the service is running, the
+app's own listener steps aside, so an open window doesn't update by itself; reopen it to see new rows.
+
+To keep it listening while the app is closed on Linux, make it a user service. Save this as
+`~/.config/systemd/user/statement-gmail.service` (use your folder's real path):
+
+```ini
+[Unit]
+Description=Statement Visualizer Gmail listener
+
+[Service]
+ExecStart=/path/to/this/folder/gmail.sh --listen
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=default.target
+```
+
+then run `systemctl --user enable --now statement-gmail` and watch it with `journalctl --user -u statement-gmail -f`.
+On macOS (untested), leave it running in a terminal or wrap it in a launchd agent.
+
+**Cost.** Pub/Sub bills by data moved, not by hours running: each request counts as at least 1 KB, and the first
+10 GiB a month are free. Ten emails a day comes to well under 100 MB a month, so it costs $0. Keep it that way with
+the 1-day retention from step 4, no message retention on the topic and no snapshots. A budget alert at $1
+(**Billing → Budgets & alerts**) tells you if anything changes.
+
+Notes:
+- The 7-day *Testing* login expiry above applies here too: the listener stops with "Gmail login missing or expired",
+  and you run `./gmail.sh` by hand to sign in again. Put `KTB_PW` and `KBANK_PW` in `.env` so it can rebuild alone.
+- Only inbox changes are announced. A statement that one of your Gmail filters moves past the inbox is still fetched,
+  but at the next inbox change or the next start, not instantly.
+- With `GMAIL_TOPIC` set, `workspace/token.json` also grants Pub/Sub access to your Google Cloud projects. Keep it
+  as private as before.
 
 ## Optional personalisation (all in `.env`)
 
@@ -248,7 +320,8 @@ Blank means off. Changes apply the next time statements are processed (`./run.sh
 Hand-entered spends with no bank record go in `workspace/manual_entries.csv` (it does not exist until you create
 it, or Gmail notices do): header line `Date,Description,Category,Amount,Balance`, then one row per spend, for example
 `2026-01-31 14:05,Lunch,Food,-120,` (Date as `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`, Balance blank, Amount negative for
-spending). A bad row is skipped with a message.
+spending). A bad row is skipped with a message. Payment emails add a sixth column, `Bank`; leave it blank on rows
+you type.
 
 ## Terminal commands
 
@@ -262,8 +335,9 @@ You never need these to use the app; they are here for reference.
 | `./run.sh` | opens the app, the same as the menu entry; on a fresh clone it installs first |
 | `./run.sh --web` | opens the browser pages instead of the app window |
 | `./run.sh --setup` | the full first-time setup again, in your browser |
-| `./run.sh --rebuild` | rebuilds from the PDFs in `Statement/` in the terminal, no window (also what cron gets) |
+| `./run.sh --rebuild` | rebuilds from the PDFs in `Statement/` in the terminal, no window |
 | `./gmail.sh` | downloads new statements from Gmail, then rebuilds (Option 2) |
+| `./gmail.sh --listen` | keeps running and does the same within seconds of new mail ([Real time](#real-time-gmail-push-optional)) |
 | `./clear.sh` | resets all your data and settings to a fresh-install state, keeping the app (see [Updating and resetting](#updating-and-resetting)) |
 | `./setup.sh` | the install step itself, which `./install.sh` and `./run.sh` call (`--app` / `--web` like `./install.sh`); running it directly also opens the app afterwards |
 
@@ -276,7 +350,8 @@ workspace/expected.json     expected spending from the setup page (git-ignored)
 workspace/manual_entries.csv  hand-typed spends + Gmail payment notices (git-ignored)
 workspace/token.json        cached Gmail login   (git-ignored, secret)
 workspace/.cache/           statements already read, so updates only read new ones (git-ignored, private)
-workspace/.app/             the app window's saved labels, theme and expected spending (Linux; git-ignored)
+workspace/.app/             the app window's saved labels, theme and expected spending (Linux; git-ignored),
+                            its size (window.json), and the real-time Gmail log gmail-listen.log
 .env                        your settings        (git-ignored, secret)
 .venv/                      the Python environment ./install.sh makes (git-ignored)
 Dashboard.html              opens the dashboard  (generated, git-ignored)
@@ -294,9 +369,10 @@ commit the code. The dashboard file contains your transactions: share it only on
 - **"Not set up yet"** (from `./gmail.sh`) → run `./install.sh` first.
 - **The install failed halfway (no internet)** → run `./install.sh` again (`./run.sh` also retries it by itself).
 - **"No PDFs in Statement/"** → add them on the page `./run.sh` opens, or copy them there first.
-- **The app opens in the browser, not its own window** → the system web view is missing (see *What you need*).
-  Everything works the same, in a tab. If you installed it in an environment other than the system's `python3`
-  (pyenv, conda), it can't see those Linux packages: delete `.venv` and run `PATH=/usr/bin:$PATH ./install.sh`.
+- **The app opens in the browser, not its own window** → Qt's web view couldn't open here (see *What you need*).
+  Everything works the same, in a tab. On an X11 desktop: `sudo apt install libxcb-cursor0`. Otherwise run
+  `./install.sh` again (the window's download may have failed), and `.venv/bin/python workspace/app.py` in a terminal
+  to see the reason.
 - **The page didn't open** → open the `http://127.0.0.1:…/?setup=…` link that `./run.sh` printed.
   It only works once, and only while `./run.sh` is running (Ctrl+C there stops it; run `./run.sh` again for a fresh
   link). No browser on this machine: put the PDFs in `Statement/` and run
@@ -315,7 +391,8 @@ commit the code. The dashboard file contains your transactions: share it only on
 ## Security notes
 
 - Everything stays on your machine. The only network use is the one-time `pip install` and the optional Gmail
-  download (read-only; it talks only to Google). Nothing from your statements is ever uploaded.
+  download (read-only; it talks only to Google, including Pub/Sub for `--listen`). Nothing from your statements is
+  ever uploaded.
 - `.env`, `workspace/token.json`, your PDFs, `ledger.csv` and the dashboard are created readable by
   you only and are git-ignored. The dashboard file contains all your transactions: don't share it.
 - Statement PDFs are parsed locally. Only run this on statements from your own bank.
@@ -328,9 +405,10 @@ commit the code. The dashboard file contains your transactions: share it only on
 
 ## Adding a bank
 
-Reading statements: one `Bank(...)` entry in `BANKS` in `workspace/extract_ledger.py` (id, name, password
-setting, file-name pattern, text that identifies its PDFs, parser). The setup page, password lookup and
-build all read that list. Showing it: one entry in `web/src/lib/banks.ts` (name, card colour, logo).
+Reading statements: one module per bank in `workspace/banks/` (`ktb.py`, `kbank.py`): its parser, a
+self-check, and a `BANK = Bank(...)` record (id, name, password setting, file-name pattern, text that
+identifies its PDFs). Copy the closest one, then add it to `BANKS` in `workspace/banks/__init__.py`. The
+setup page, password lookup and build all read that list. Showing it: one entry in `web/src/lib/banks.ts` (name, card colour, logo).
 Themes work the same way: one entry in `web/src/lib/themes.ts`, plus a `[data-theme="…"]` block in
 `web/src/index.css` for colours beyond the light/dark base.
 
