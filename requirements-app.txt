@@ -1,1 +1,5 @@
 pywebview>=6,<7
+# Linux: the window is Qt's web view (Chromium), all from pip (~550 MB installed). macOS uses its own WebKit.
+PyQt6>=6.5,<7; sys_platform == "linux"
+PyQt6-WebEngine>=6.5,<7; sys_platform == "linux"
+QtPy>=2; sys_platform == "linux"

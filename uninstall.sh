@@ -28,7 +28,11 @@ main() {
 
   # The Linux app-menu entry lives outside this folder (setup.sh writes it); on macOS the launcher is inside.
   launcher="${XDG_DATA_HOME:-$HOME/.local/share}/applications/statement-visualizer.desktop"
-  items=("$launcher" .venv web/node_modules web/dist Dashboard.html "Statement Visualizer.command")
+  # The app window's web view folders (Linux, app.py): its cache, and Qt's default profile folder (empty: the window's
+  # storage is workspace/.app/)
+  qtcache="${XDG_CACHE_HOME:-$HOME/.cache}/statement-visualizer"
+  qtdata="${XDG_DATA_HOME:-$HOME/.local/share}/statement-visualizer"
+  items=("$launcher" "$qtcache" "$qtdata" .venv web/node_modules web/dist Dashboard.html "Statement Visualizer.command")
   found=()
   for f in "${items[@]}"; do [ -e "$f" ] && found+=("$f"); done
 

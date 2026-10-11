@@ -25,22 +25,34 @@ need python3 "Install Python 3.10 or newer."
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || { echo "Python 3.10+ is required." >&2; exit 1; }
 ok "$(python3 --version)"
 
-# Linux: the environment also sees the system's Python packages, for the app window's GTK/WebKit bindings (python3-gi
-# can't be pip-installed without compilers). Re-running on an existing .venv just switches that on; nothing is lost.
-sys_pkgs=; [ "$(uname -s)" = Linux ] && [ "$mode" = app ] && sys_pkgs=--system-site-packages
-if [ -d .venv ]; then
-  python3 -m venv $sys_pkgs .venv
+if [ -d .venv ] && grep -qs '^include-system-site-packages = true' .venv/pyvenv.cfg; then
+  # An older install let it see the system's packages (the old GTK window's python3-gi), and pip skipped whatever the
+  # system had. Start it clean, so it has everything it needs on its own; the packages are installed again below.
+  say "Rebuilding the Python environment (.venv) on its own"
+  python3 -m venv --clear .venv
+  ok "rebuilt"
+elif [ -d .venv ]; then
+  python3 -m venv .venv
   ok "Python environment already there (.venv)"
 else
   say "Creating the Python environment (.venv)"
-  python3 -m venv $sys_pkgs .venv
+  python3 -m venv .venv
   ok "created"
 fi
-say "Installing Python packages (pdfplumber, Google sign-in$([ "$mode" = app ] && echo ', app window'), ...): about a minute the first time"
+if [ "$mode" = app ] && [ "$(uname -s)" = Linux ]; then
+  say "Installing Python packages (pdfplumber, Google sign-in, the app window's Qt web view: a ~200 MB download): a few minutes the first time"
+else
+  say "Installing Python packages (pdfplumber, Google sign-in$([ "$mode" = app ] && echo ', app window'), ...): about a minute the first time"
+fi
 reqs=(requirements.txt); [ "$mode" = app ] && reqs+=(requirements-app.txt)
-pip_args=(); for r in "${reqs[@]}"; do pip_args+=(-r "$r"); done
 .venv/bin/python -m pip install --quiet --upgrade pip
-.venv/bin/python -m pip install --quiet "${pip_args[@]}"
+.venv/bin/python -m pip install --quiet -r requirements.txt
+# The app window's packages may fail without failing the install: a computer with no ready-made Qt package (32-bit ARM,
+# an old glibc) would otherwise try to compile Qt. Then app.py finds no window and run.sh uses the browser pages.
+if [ "$mode" = app ] && ! .venv/bin/python -m pip install --quiet \
+    --only-binary=PyQt6,PyQt6-Qt6,PyQt6-sip,PyQt6-WebEngine,PyQt6-WebEngine-Qt6 -r requirements-app.txt; then
+  echo "  (The app window's package didn't install here, so the app opens in your browser. Run ./install.sh to try again.)"
+fi
 cat "${reqs[@]}" > .venv/requirements.installed   # run.sh reinstalls when this differs from the requirements files
 echo "$mode" > .venv/mode
 ok "Python packages ready"
@@ -90,8 +102,11 @@ DESK
     elif [ ! -t 0 ]; then
       echo "  (No terminal to ask, so no app-menu launcher. Run ./install.sh in a terminal to add it.)"
     fi
-    .venv/bin/python -c "import webview.platforms.gtk" 2>/dev/null ||
-      echo "  (No app window here, so the launcher opens your browser. For the window, Debian/Ubuntu: sudo apt install python3-gi gir1.2-webkit2-4.1)" ;;
+    if ! .venv/bin/python -c "import PyQt6.QtWebEngineWidgets" 2>/dev/null; then
+      echo "  (Qt's web view doesn't load here, so the launcher opens your browser. See \"App window\" in README.md.)"
+    elif [ "${XDG_SESSION_TYPE:-}" != wayland ] && ! .venv/bin/python -c 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("xcb-cursor"))'; then
+      echo "  (No app window on this X11 desktop yet, so the launcher opens your browser. For the window: sudo apt install libxcb-cursor0)"
+    fi ;;
   app-Darwin)
     printf '#!/usr/bin/env bash\ncd "$(dirname "$0")" && exec ./run.sh --app\n' > "Statement Visualizer.command"
     chmod 700 "Statement Visualizer.command"

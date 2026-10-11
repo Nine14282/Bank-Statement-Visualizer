@@ -4,12 +4,12 @@
 #   ./run.sh                      opens the app: its own window with the dashboard, Add statements and Settings, or
 #                                 the first-time setup when there's no ledger yet (statements, passwords, theme,
 #                                 expected spending). Installs what's missing first. No window possible here (no
-#                                 pywebview / WebKit)? The same setup or add-statements pages open in the browser
+#                                 Qt web view)? The same setup or add-statements pages open in the browser
 #   ./run.sh --web                the browser pages instead of the app window (also the default after ./install.sh --web)
 #   ./run.sh --setup              the full setup page again, in the browser (in the app: the Settings button)
 #   ./run.sh --app                the app, also with nobody at the terminal (what the launcher from ./setup.sh runs)
 #   ./run.sh --rebuild            no browser: rebuild from the PDFs already in Statement/ (asks for a password
-#                                 in the terminal if needed). Also what runs when nobody is at the terminal (cron)
+#                                 in the terminal if needed). Also what runs when nobody is at the terminal (a script)
 #   KTB_PW=... KBANK_PW=... ./run.sh --rebuild   or keep the passwords in .env (the pages can save them there)
 #   ./run.sh --password=...       rebuild with this password (visible in shell history)
 set -euo pipefail
@@ -56,7 +56,8 @@ if [ "$setup" = 0 ] && [ "$rebuild" = 0 ] && [ "$web" = 0 ] && [ "$mode" = app ]
   .venv/bin/python workspace/build_dashboard.py >/dev/null   # always: a pull may bring a newer page, settings may change
   say "Opening the app"
   code=0; .venv/bin/python workspace/app.py || code=$?
-  [ "$code" = 3 ] || exit "$code"
+  # 3 = app.py found no window possible; 134 = Qt aborted anyway (a platform plugin app.py's check didn't foresee)
+  [ "$code" = 3 ] || [ "$code" = 134 ] || exit "$code"
   say "No app window here (see README); using the browser instead"
   if [ "$app" = 1 ] && [ -f workspace/ledger.csv ]; then   # the launcher: just show the dashboard
     exec .venv/bin/python -c 'import pathlib, sys, webbrowser; webbrowser.open(pathlib.Path(sys.argv[1]).resolve().as_uri())' \
@@ -67,7 +68,7 @@ if [ "$setup" = 1 ] || [ ! -f workspace/ledger.csv ]; then
   if [ "$setup" = 1 ]; then say "Opening the setup page (--setup)"; else say "No ledger yet: opening the setup page"; fi
   exec .venv/bin/python workspace/welcome.py
 fi
-# No app window: a person at the terminal gets the add-statements page; --rebuild, --password= or cron rebuild here.
+# No app window: a person at the terminal gets the add-statements page; --rebuild, --password= or a script with no terminal rebuild here.
 if [ "$rebuild" = 0 ] && [ ${#args[@]} -eq 0 ] && [ -t 0 ]; then
   say "Opening the page to add new statements (./run.sh --rebuild skips it)"
   exec .venv/bin/python workspace/welcome.py --add
