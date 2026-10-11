@@ -254,9 +254,8 @@ def pull(interactive=False):
     """Download new statement PDFs and payment notices; returns (PDF paths, notice count). One at a time: a second
     fetch (the listener's, ./gmail.sh, the page's Gmail button) waits, then reads the seen list the first one wrote, so
     the two never append the same notices or overwrite each other's seen list."""
-    import fcntl
     with open(LOCK, "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)    # released when the file closes, also if this process dies
+        config.lock(lock)                   # released when the file closes, also if this process dies
         seen = set(json.load(open(SEEN))) if os.path.exists(SEEN) else set()
         svc = service(interactive)
         downloaded = fetch(svc, seen)
@@ -409,7 +408,6 @@ def listen(build):
     """--listen: fetch within seconds of new mail. Gmail posts every inbox change to the Pub/Sub topic; this waits
     on the subscription and runs the normal fetch per notification (the seen list skips mail already handled, so
     the notification's content is not needed)."""
-    import fcntl
     import signal
     import subprocess
     import time
@@ -420,9 +418,7 @@ def listen(build):
     if not (TOPIC and SUBSCRIPTION and PROJECT):
         sys.exit(LISTEN_HELP)
     me = open(__file__)             # one listener at a time (the app window's and a service's): lock this script file
-    try:
-        fcntl.flock(me, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    if not config.lock(me, wait=False):
         sys.exit("Another listener is already running.")
     state = {"busy": False, "stop": False}
 

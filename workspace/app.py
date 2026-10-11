@@ -49,7 +49,8 @@ def our_page() -> bool:
     import webview
     from urllib.parse import unquote, urlsplit
     shown, ours = urlsplit(webview.windows[0].get_current_url() or ""), urlsplit(PAGE.as_uri())
-    return shown.scheme == "file" and unquote(shown.path) == unquote(ours.path)
+    same = os.path.normcase   # Windows: C:/ and c:/ name the same file
+    return shown.scheme == "file" and same(unquote(shown.path)) == same(unquote(ours.path))
 
 
 class Api:
@@ -182,15 +183,13 @@ def only_window():
     updates (one Gmail listener runs) and could build at the same time. Returns the lock, held while this process
     runs, or None when another window has it. ponytail: no raising the open window (Wayland won't let an app take
     focus anyway); the second launch just says so."""
-    import fcntl
+    import config
     os.makedirs(STORE, exist_ok=True)
     lock = open(os.path.join(STORE, "window.lock"), "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        lock.close()
-        return None
-    return lock
+    if config.lock(lock, wait=False):
+        return lock
+    lock.close()
+    return None
 
 
 def window_state() -> dict:

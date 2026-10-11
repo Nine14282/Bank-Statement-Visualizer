@@ -32,6 +32,30 @@ def load_env() -> None:
 load_env()
 
 
+def lock(f, wait: bool = True) -> bool:
+    """Lock an open file for this process; it's released when the file closes, also if the process dies. True once
+    held; with wait=False, False at once when another process holds it. fcntl on Linux and macOS, msvcrt on Windows
+    (which locks a byte range, not the file: byte 0, the same one for every process)."""
+    if os.name == "nt":
+        import msvcrt
+        import time
+        f.seek(0)
+        while True:
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                return True
+            except OSError:
+                if not wait:
+                    return False
+                time.sleep(0.5)
+    import fcntl
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        return True
+    except BlockingIOError:
+        return False
+
+
 def save(key: str, value: str) -> None:
     """Set KEY=value in the settings file (replace the KEY= line, else append) and in os.environ.
     Used by the setup wizard; the file stays readable by you only."""

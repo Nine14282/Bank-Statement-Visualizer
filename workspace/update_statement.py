@@ -373,7 +373,8 @@ def selfcheck():
             quiet_load(pdf)
             prune_cache()
             assert len(os.listdir(CACHE)) == 1, os.listdir(CACHE)           # older entries pruned
-            assert oct(os.stat(os.path.join(CACHE, os.listdir(CACHE)[0])).st_mode & 0o777) == "0o600"
+            if os.name != "nt":   # Windows keeps files private by folder permissions, not mode bits
+                assert oct(os.stat(os.path.join(CACHE, os.listdir(CACHE)[0])).st_mode & 0o777) == "0o600"
     finally:
         CACHE, read_pdf = real_cache, real_read
         if saved is None:

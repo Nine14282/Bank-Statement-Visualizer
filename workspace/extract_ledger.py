@@ -68,7 +68,11 @@ def write_csv(rows, dst):
         w = csv.DictWriter(f, fieldnames=HEADER)
         w.writeheader()
         w.writerows(rows)
-    os.replace(tmp, dst)
+    try:
+        os.replace(tmp, dst)
+    except PermissionError:   # Windows won't replace a file another program has open
+        os.remove(tmp)
+        sys.exit(f"Can't update {dst}: close it in the program that has it open (Excel?), then try again.")
 
 
 def selfcheck():
