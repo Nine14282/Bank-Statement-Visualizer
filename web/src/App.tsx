@@ -1,83 +1,21 @@
 import { memo, useEffect, useMemo, useState } from 'react'
-import LinearProgress from '@mui/material/LinearProgress'
 import { motion } from 'motion/react'
-import { ArrowRight } from 'lucide-react'
 import { CategoryCard } from '@/components/ledger/categories'
 import { CustomTab } from '@/components/ledger/custom'
 import { PlanTab } from '@/components/ledger/plan'
-import { InfoTip } from '@/components/ledger/info'
 import { Reveal } from '@/components/ledger/motion'
 import { Predict } from '@/components/ledger/predict'
 import { Nav, TopBar } from '@/components/ledger/shell'
-import { goTo, useActiveSection, useAfterPaint, type Tab } from '@/lib/nav'
+import { useActiveSection, useAfterPaint, type Tab } from '@/lib/nav'
 import { usePlan, type PlanItem } from '@/lib/plan'
 import { useTheme } from '@/lib/themes'
 import { Wizard } from '@/components/setup/wizard'
-import { Index, SpendRate } from '@/components/ledger/spend-rate'
+import { SpendRate } from '@/components/ledger/spend-rate'
 import { TxTable } from '@/components/ledger/tx-table'
 import { MoneyMovement, MonthSpend, Overview, Payees, RecentTx, Segmented, WalletStack } from '@/components/ledger/widgets'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { LAST, META, TX, YEARS, bankName, baht, daysBetween, firstName, monthsBack, pctOf, rateTable, summarize, type Tx } from '@/lib/ledger'
+import { LAST, META, TX, YEARS, bankName, baht, daysBetween, firstName, summarize, useLedger, type Tx } from '@/lib/ledger'
 import { APP, ARRIVE, ARRIVE_MS, EASE, cn, endArrival } from '@/lib/utils'
-
-function Recent() {
-  const { months, total, usual } = useMemo(() => rateTable(monthsBack(4), LAST, false), [])
-  return (
-    <Card data-od-id="recent-months">
-      <CardHeader className="pb-1">
-        <CardTitle>Last 4 months</CardTitle>
-        <CardDescription>
-          {months[0].k} → {months[months.length - 1].k} · spending excludes cash, lending &amp; stock
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid grid-cols-2 gap-3 border-y py-3">
-          <div>
-            <div className="eyebrow">Spend / day</div>
-            <div className="display mt-1 text-2xl">{baht(total.rate)}</div>
-            <div className="text-xs text-muted-foreground">usual {usual == null ? '—' : baht(usual)}</div>
-          </div>
-          <div>
-            <div className="eyebrow flex items-center gap-1">vs usual
-              <InfoTip>This period's ฿/day ÷ your usual ฿/day (median of earlier months). Above 1× = spending faster than usual.</InfoTip>
-            </div>
-            <div className="display mt-1 text-2xl"><Index r={total.rate} usual={usual} /></div>
-            <div className="text-xs text-muted-foreground">daily rate ÷ usual rate</div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-          <div>
-            <div className="eyebrow">Avg spend / month</div>
-            <div className="num mt-1 text-sm font-medium">{baht(total.spend / months.length)}</div>
-          </div>
-          <div>
-            <div className="eyebrow">Expense ÷ income</div>
-            <div className="num mt-1 text-sm font-medium">{pctOf(total.out, total.inc)}</div>
-          </div>
-        </div>
-        <div className="divide-y border-t">
-          {months.map((r) => (
-            <div key={r.k} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 py-2">
-              <span className="text-sm text-muted-foreground">{r.k}{r.partial && <small className="ml-1">· partial</small>}</span>
-              <span className="num text-right text-sm">{baht(r.spend)} <small className="text-muted-foreground">spent</small></span>
-              <LinearProgress variant="determinate" aria-label={`${r.k} daily spend rate`}
-                value={Math.min(100, (r.rate / Math.max(...months.map((m) => m.rate), 1)) * 100)}
-                sx={{ height: 4, borderRadius: 2, bgcolor: 'var(--muted)', gridColumn: '1 / -1', order: 3,
-                  '& .MuiLinearProgress-bar': { borderRadius: 2, bgcolor: (usual && r.rate / usual > 1.15) ? 'var(--neg)' : 'var(--expense)' } }} />
-              <span className="num col-span-2 whitespace-nowrap text-right text-xs sm:col-span-1" title="Daily rate · vs usual · out ÷ in">
-                {baht(r.rate)}/day · <Index r={r.rate} usual={usual} /> · {pctOf(r.out, r.inc)}
-              </span>
-            </div>
-          ))}
-        </div>
-        <Button variant="ghost" size="sm" className="w-full justify-between px-0" onClick={() => goTo('spend-rate')}>
-          View spend rate <ArrowRight />
-        </Button>
-      </CardContent>
-    </Card>
-  )
-}
 
 function Coverage() {
   const g = META.gaps
@@ -135,7 +73,8 @@ function Ledger({ theme, onAdd, onSettings, inert }: {
   const [year, setYear] = useState('all')
   const [term, setTerm] = useState('')
   const [plan, setPlan] = usePlan()
-  const rows = useMemo(() => (year === 'all' ? TX : TX.filter((r) => r.date.startsWith(year))), [year])
+  const tx = useLedger()   // a rebuild swaps the data in place (main.tsx): no reload, scroll and state kept
+  const rows = useMemo(() => (year === 'all' ? tx : tx.filter((r) => r.date.startsWith(year))), [year, tx])
   const setTab = (t: Tab) => {
     if (t === tab) return
     location.replace(t === 'dashboard' ? '#' : `#${t}`)
@@ -225,10 +164,9 @@ function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
       {later && <>
         <section id="categories" className="scroll-mt-20 space-y-4">
           <h2 className="text-2xl tracking-tight sm:text-3xl">Categories</h2>
-          <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-2 xl:grid-cols-3" data-od-id="category-lists">
+          <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 lg:grid-cols-2" data-od-id="category-lists">
             <Reveal className={fill}><CategoryList title="Where money went" caption="Expenses by category" list={s.ecat} color="var(--expense)" /></Reveal>
             <Reveal className={fill} delay={0.06}><CategoryList title="Where money came from" caption="Income by category" list={s.icat} color="var(--income)" /></Reveal>
-            <Reveal className={fill} delay={0.12}><Recent /></Reveal>
           </div>
         </section>
 
@@ -274,6 +212,7 @@ function EmptyState() {
 const SETUP = new URLSearchParams(location.search).has('setup')
 
 export default function App() {
+  useLedger()   // re-render on a data swap: the empty state turns into the dashboard, and back
   const theme = useTheme()
   // App window: Add statements (and Settings: the full setup) open over the dashboard, in this same page (no page load,
   // no transition). The dashboard stays underneath, inert, scroll position kept.
@@ -291,7 +230,9 @@ export default function App() {
     <>
       <Ledger theme={theme} inert={!!panel}
         onAdd={APP ? () => setPanel('add') : undefined} onSettings={APP ? () => setPanel('setup') : undefined} />
-      {panel && <Wizard theme={theme} mode={panel} onClose={() => setPanel(null)} />}
+      {/* closed without an update of its own: catch up on any the listener pushed meanwhile (main.tsx); after the
+          panel has left the page, which the update checks for */}
+      {panel && <Wizard theme={theme} mode={panel} onClose={() => { setPanel(null); setTimeout(() => (window as { __ledgerUpdate?: () => void }).__ledgerUpdate?.()) }} />}
     </>
   )
 }

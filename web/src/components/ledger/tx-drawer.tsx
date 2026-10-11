@@ -6,7 +6,7 @@ import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Typography from '@mui/material/Typography'
-import { LATE_NOTE, RULES, TX, bankName, baht, lateNight, merchant, ruleFor, saveRules, signed, type Rule, type Tx } from '@/lib/ledger'
+import { LATE_NOTE, RULES, TX, bankName, baht, lateNight, merchant, onData, ruleFor, saveRules, signed, type Rule, type Tx } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -16,7 +16,9 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
   </div>
 )
 
-const CATS = [...new Set(TX.map((t) => t.cat))].sort()
+const cats = () => [...new Set(TX.map((t) => t.cat))].sort()
+let CATS = cats()
+onData(() => { CATS = cats() })
 
 // Label editor: key it by tx (and rule) so the fields reset when another one is opened. Edits the label that wins
 // for this transaction, or `rule` when the caller picked a specific one (e.g. a label hidden by a broader one).

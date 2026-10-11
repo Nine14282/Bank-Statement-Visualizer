@@ -11,7 +11,7 @@ import { bankName } from '@/lib/banks'
 import { baht } from '@/lib/ledger'
 import { expectedFor, newId, type PlanItem } from '@/lib/plan'
 import { THEMES, type useTheme } from '@/lib/themes'
-import { APP, EASE, cn } from '@/lib/utils'
+import { APP, EASE, bridge, cn } from '@/lib/utils'
 
 // First-run setup, shown when ./run.sh's local server (workspace/welcome.py) opens the page at /?setup.
 // Later runs open the short "add statements" version at /?setup&add (welcome.py --add): no welcome, theme or
@@ -24,15 +24,8 @@ const SETUP_STEPS = ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 
 const ADD_STEPS = ['Statements', 'Passwords', 'Finish'] as const
 type Step = (typeof SETUP_STEPS)[number]
 
-// The app window (App.tsx shows this over the dashboard) has no server: pywebview's bridge calls workspace/app.py's
-// Api.call with the same paths. pywebview creates its api object empty and fills it in just before pywebviewready, so
-// wait for the method itself. PDFs travel base64-encoded.
-type Bridge = { call: (path: string, name: string, data: unknown) => Promise<any> }
-const bridge = () => new Promise<Bridge>((ok) => {
-  const w = window as unknown as { pywebview?: { api?: Partial<Bridge> } }
-  if (w.pywebview?.api?.call) ok(w.pywebview.api as Bridge)
-  else window.addEventListener('pywebviewready', () => ok(w.pywebview!.api as Bridge), { once: true })
-})
+// The app window (App.tsx shows this over the dashboard) has no server: pywebview's bridge (lib/utils.ts) calls
+// workspace/app.py's Api.call with the same paths. PDFs travel base64-encoded.
 const base64 = (b: Blob) => new Promise<string>((ok, fail) => {
   const r = new FileReader()
   r.onload = () => ok(String(r.result).split(',', 2)[1])
@@ -60,7 +53,7 @@ const api: Api = async (path, body, raw = false) => {
 type Progress = { stage: string; done: number; total: number }   // /api/progress: what the build is doing
 type BankRow = { id: string; name: string; saved: boolean }
 type FileRow = { name: string; bank: string | null; locked: boolean; ok: boolean; uploaded: boolean }
-type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[] }
+type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[]; gmail: boolean }   // gmail: Google keys set
 type Api = (path: string, body?: unknown, raw?: boolean) => Promise<any>   // JSON from welcome.py; each caller reads its own fields
 
 
@@ -100,6 +93,16 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
     : name === 'Spending' ? 'Optional: you can skip this' : ''
 
   const go = (d: number) => { setError(''); setStep((s) => s + d) }
+  // Esc goes back to the dashboard, like the Dashboard button (only over it: onClose). Not while files upload or the
+  // update builds, nor after it worked (the page reloads by itself then). A popover or menu closes first: MUI stops
+  // its Esc before it reaches the window.
+  const closable = !!onClose && !building && !uploading && !result?.ok
+  useEffect(() => {
+    if (!closable) return
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.isComposing && !e.defaultPrevented) onClose!() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [closable, onClose])
   const finish = async () => {
     // The loader animates even in the app window (DESIGN.md "Desktop app window"). Switched on here, before it
     // mounts: its children start their animations before any effect of its own could.
@@ -257,6 +260,20 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
 }) {
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState<string[]>([])
+  const [mail, setMail] = useState<'' | 'busy' | string>('')   // the Gmail button: idle, fetching, or what it found
+  const fetchMail = async () => {
+    setMail('busy')
+    onBusy(1)
+    try {
+      const r = await api('/api/gmail', {})
+      setMail(r.files || r.notices
+        ? `Gmail: ${r.files} new statement${r.files === 1 ? '' : 's'}, ${r.notices} payment notice${r.notices === 1 ? '' : 's'}.`
+        : 'Gmail: nothing new.')
+    }
+    catch (e) { setMail(''); onError((e as Error).message) }
+    onBusy(0)
+    await refresh()
+  }
   const addFiles = async (list: FileList | null) => {
     const pdfs = Array.from(list ?? [])
     const bad = pdfs.filter((f) => !/\.pdf$/i.test(f.name))
@@ -290,6 +307,17 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
         <span className="text-xs text-muted-foreground">They are copied into the Statement/ folder</span>
         <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
       </label>
+      {st?.gmail && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className={ghost} disabled={mail === 'busy'} onClick={fetchMail}>
+            {mail === 'busy' ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+            {mail === 'busy' ? 'Checking Gmail…' : 'Fetch from Gmail'}
+          </button>
+          <span className="text-xs text-muted-foreground" aria-live="polite">
+            {mail === 'busy' ? 'The first time, sign in to Google in your browser.' : mail}
+          </span>
+        </div>
+      )}
       <ul className="min-h-0 divide-y overflow-y-auto rounded-2xl border" aria-label="Statements">
         {!files.length && !busy.length && <li className="px-4 py-5 text-center text-sm text-muted-foreground">{add ? 'No new statements yet.' : 'No statements yet.'}</li>}
         {files.map((f) => (
@@ -521,7 +549,7 @@ function Finish({ add, building, progress, result, retry }: {
     ['Consent screen', <>Choose <b>External</b> and add your own Gmail as a test user.</>],
     ['Credentials', <>Create an <b>OAuth client ID</b> of type <b>Desktop app</b>; put its ID and secret in <code className="num">.env</code> as <code className="num">GOOGLE_CLIENT_ID</code> / <code className="num">GOOGLE_CLIENT_SECRET</code>.</>],
     ['First run', <>Run <code className="num">./gmail.sh</code> and sign in once. It downloads new statements and rebuilds the dashboard.</>],
-    ['Every day', <>Optional: <code className="num">crontab -e</code> → <code className="num">0 8 * * * cd {'<project folder>'} && ./gmail.sh</code> (needs remembered passwords).</>],
+    ['By itself', <>Optional: set up real-time Gmail (README, “Real time”). Then the app fetches new mail the moment it arrives while it is open (needs remembered passwords).</>],
   ]
   return (
     <Frame title="Last thing: statements by email" icon={<Mail className="size-5" />}

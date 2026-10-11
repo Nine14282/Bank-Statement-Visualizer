@@ -1,16 +1,22 @@
+import { useSyncExternalStore } from 'react'
 import { bankName } from '@/lib/banks'
 import type { PlanItem } from '@/lib/plan'
 export type Tx = { date: string; desc: string; cat: string; amt: number; bal: number | null; bank: string; label?: string }
 export type Gaps = { months: string[]; breaks: { after: string; before: string; missing: number; bank?: string }[] }
 // theme / plan: picked in the setup wizard (THEME setting, workspace/expected.json); absent in older ledgers.
-export type Meta = { account: string; name: string; from: string; to: string; n: number; gaps: Gaps; theme?: string; plan?: PlanItem[] }
+// page: id of the app build the data was written for (build_dashboard.py); a different one means reload for new code.
+// build: the stamp of the build that wrote this data (= version.js __BUILD); live updates compare against it (main.tsx).
+export type Meta = { account: string; name: string; from: string; to: string; n: number; gaps: Gaps; theme?: string; plan?: PlanItem[]; page?: string; build?: number }
 
 // The ledger is not part of the build: build_dashboard.py writes it into the page's <script id="ledger-data"> tag
 // (the vite dev server does the same from src/data/ledger.json). So the committed prebuilt page holds no data, and
 // users need no Node: null (the untouched placeholder) = no data yet, and the app shows its empty state.
-const EMPTY = { meta: { account: '', name: '', from: '', to: '', n: 0, gaps: { months: [], breaks: [] } }, tx: [] }
-export const DATA: { meta: Meta; tx: Tx[] } = JSON.parse(document.getElementById('ledger-data')?.textContent || 'null') ?? EMPTY
-export const TX = DATA.tx
+// A rebuild while the page is open swaps in new data without a reload (setData below, called from main.tsx). These are
+// `let` on purpose: an ES module import is a live binding, so every importer reads the new values after a swap.
+type Data = { meta: Meta; tx: Tx[] }
+const EMPTY: Data = { meta: { account: '', name: '', from: '', to: '', n: 0, gaps: { months: [], breaks: [] } }, tx: [] }
+export let DATA: Data = JSON.parse(document.getElementById('ledger-data')?.textContent || 'null') ?? EMPTY
+export let TX = DATA.tx
 
 /* ---------- your own labels: "description contains X" -> label (+ optional category), kept in this browser ---------- */
 export type Rule = { match: string; label: string; cat?: string }
@@ -26,10 +32,13 @@ export const ruleFor = (desc: string) => {
 }
 // Rows a rule's text appears in, whether or not it is the one that wins there.
 export const rowsFor = (r: Rule) => TX.filter((t) => t.desc.toLowerCase().includes(r.match.toLowerCase()))
-for (const t of TX) {  // applied once at load, so every total, chart and search sees it
-  const r = ruleFor(t.desc)
-  if (r) { t.label = r.label; if (r.cat) t.cat = r.cat }
+const applyRules = () => {  // applied once per dataset, so every total, chart and search sees it
+  for (const t of TX) {
+    const r = ruleFor(t.desc)
+    if (r) { t.label = r.label; if (r.cat) t.cat = r.cat }
+  }
 }
+applyRules()
 // ponytail: save = reload, so every derived number recomputes; live store if reloading ever feels slow
 export function saveRules(rules: Rule[]) {
   try { localStorage.setItem(RULES_KEY, JSON.stringify(rules)) } catch { alert('This browser blocks saving labels.'); return }
@@ -44,10 +53,32 @@ export const descOf = (t: Tx) => t.desc.replace(FUTURE, '')
 export const LATE_NOTE = 'Paid after the bank’s nightly cut-off (about 23:00). The statement posts it early the next morning; the time shown is the payment email’s when there is one.'
 // Default text to match on: the merchant/recipient part of a payment-email row, else the whole description.
 export const merchant = (desc: string) => desc.split(' (email) ')[1] ?? desc
-export const META = DATA.meta
-export const YEARS = [...new Set(TX.map((r) => r.date.slice(0, 4)))].sort()
-export const FIRST = META.from.slice(0, 10)
-export const LAST = META.to.slice(0, 10)
+export let META = DATA.meta
+export let YEARS = [...new Set(TX.map((r) => r.date.slice(0, 4)))].sort()
+export let FIRST = META.from.slice(0, 10)
+export let LAST = META.to.slice(0, 10)
+
+// Live data swap. Module-level caches derived from TX re-derive in onData; components that read the data call
+// useLedger(), which re-renders them on a swap (memo'd ones too). It returns TX (a new array per swap): the dependency
+// their useMemos recompute on.
+let version = 0
+const listeners = new Set<() => void>()
+const derived: (() => void)[] = []
+export const onData = (fn: () => void) => { derived.push(fn) }
+export function setData(d: Data | null) {
+  DATA = d ?? EMPTY
+  TX = DATA.tx
+  META = DATA.meta
+  YEARS = [...new Set(TX.map((r) => r.date.slice(0, 4)))].sort()
+  FIRST = META.from.slice(0, 10)
+  LAST = META.to.slice(0, 10)
+  applyRules()
+  for (const fn of derived) fn()
+  version++
+  for (const l of listeners) l()
+}
+const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+export const useLedger = () => { useSyncExternalStore(subscribe, () => version); return TX }
 
 export { bankName }
 // Money moved between your own accounts: left out of income, expenses and spend rate (it nets to zero).

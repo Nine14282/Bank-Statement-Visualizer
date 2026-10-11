@@ -6,7 +6,7 @@ import { CountUp, Reveal } from '@/components/ledger/motion'
 import { PayeeAvatar, Segmented } from '@/components/ledger/widgets'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { FIRST, LAST, TX, addDays, baht, daysBetween, monthLabel, payees } from '@/lib/ledger'
+import { FIRST, LAST, addDays, baht, daysBetween, monthLabel, payees, useLedger } from '@/lib/ledger'
 import { expectedFor, newId, perMonth, type PlanItem } from '@/lib/plan'
 import { EASE } from '@/lib/utils'
 
@@ -24,8 +24,9 @@ export function PlanTab({ plan, onPlan }: { plan: PlanItem[]; onPlan: (p: PlanIt
   const monthly = plan.filter((i) => i.every === 'month').reduce((a, i) => a + i.amount, 0)
   // Suggestions: the 30 most frequent payees of the last 90 days; a search looks through every payee ever (labels
   // included), so one with few or older payments can still be added.
-  const recent = useMemo(() => new Map(payees(TX.filter((t) => t.date.slice(0, 10) > addDays(LAST, -LOOKBACK)), Infinity).map((p) => [p.key, p])), [])
-  const everyone = useMemo(() => payees(TX, Infinity), [])
+  const tx = useLedger()
+  const recent = useMemo(() => new Map(payees(tx.filter((t) => t.date.slice(0, 10) > addDays(LAST, -LOOKBACK)), Infinity).map((p) => [p.key, p])), [tx])
+  const everyone = useMemo(() => payees(tx, Infinity), [tx])
   const [q, setQ] = useState('')
   const ql = q.trim().toLowerCase()
   const suggest = ql

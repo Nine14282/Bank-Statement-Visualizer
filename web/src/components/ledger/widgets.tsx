@@ -12,7 +12,7 @@ import { goTo } from '@/lib/nav'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { KEY } from '@/components/ledger/tx-table'
-import { LAST, bankName, baht, daily, descOf, monthLabel, payees, signed, thisMonth, type Payee, type Summary, type Tx } from '@/lib/ledger'
+import { LAST, bankName, baht, daily, descOf, monthLabel, payees, signed, thisMonth, useLedger, type Payee, type Summary, type Tx } from '@/lib/ledger'
 import { expectedFor, type PlanItem } from '@/lib/plan'
 import { EASE, cn } from '@/lib/utils'
 
@@ -216,29 +216,31 @@ function MonthTable({ months }: { months: Summary['months'] }) {
   )
 }
 
-const TICKS = 48
 const dm = (d: string) => `${+d.slice(8)} ${monthLabel(d)}`
 
-// This month's spending against the user's expected spending, drawn as a row of ticks that fill in one by one.
+// This month's spending against the user's expected spending: one filled bar (full = the month's expected spending)
+// with a line at what you'd expect to have spent by today. Past the line, the rest of the fill turns red and the card
+// says how much over; short of it, how much you've saved so far.
 // No list yet: the card says so and links to the Expected Spending tab instead of inventing a target.
 export function MonthSpend({ plan, onPlan }: { plan: PlanItem[]; onPlan: () => void }) {
   const keys = useMemo(() => new Set(plan.flatMap((i) => (i.key ? [i.key] : []))), [plan])
-  const t = useMemo(() => thisMonth(keys), [keys])
+  const v = useLedger()
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- v: the data the helper reads changed (live swap)
+  const t = useMemo(() => thisMonth(keys), [keys, v])
   const expected = expectedFor(plan, t.days)
   // Expected by today: daily items for the days gone, monthly items prorated.
-  // ponytail: prorates a monthly bill paid on day 1; track due dates if that early spike reads as "ahead"
+  // ponytail: prorates a monthly bill paid on day 1; track due dates if that early spike reads as "over"
   const dayGone = Math.round(t.elapsed * t.days)
   const dueNow = plan.reduce((a, i) => a + (i.every === 'day' ? i.amount * dayGone : i.amount * t.elapsed), 0)
-  const ratio = expected ? t.spent / expected : 0
-  const filled = Math.min(TICKS, Math.round(ratio * TICKS))
-  const pace = Math.min(TICKS - 1, Math.round(t.elapsed * TICKS))
-  const status = t.spent > expected ? 'Over expected' : t.spent > dueNow * 1.1 ? 'Ahead of plan' : 'On track'
-  const bad = status !== 'On track'
+  const diff = t.spent - dueNow   // > 0: over what's expected by today; otherwise saved
+  const over = diff > 0
+  const at = (n: number) => (expected ? Math.min(100, (n / expected) * 100) : 0)   // % along the bar
+  const line = at(dueNow)
   return (
     <Card data-od-id="month-spend" className="min-w-0">
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">Spent this month
-          <InfoTip>Spending so far this month (cash withdrawals, lending and stock buys left out). The full bar is your expected spending: daily items × days in the month + monthly items, from the Expected Spending tab.</InfoTip>
+          <InfoTip>Spending so far this month (cash withdrawals, lending and stock buys left out). The full bar is your expected spending for the month: daily items × days in the month + monthly items, from the Expected Spending tab. The line is what you'd expect to have spent by today: daily items for the days gone, monthly items in proportion.</InfoTip>
         </CardTitle>
         <CardDescription>From {dm(t.from)} to {dm(t.end)} · excludes cash, lending &amp; stock</CardDescription>
         <CardAction><RoundLink label="Spend rate" to="spend-rate"><Gauge className="size-4" /></RoundLink></CardAction>
@@ -247,7 +249,8 @@ export function MonthSpend({ plan, onPlan }: { plan: PlanItem[]; onPlan: () => v
         <div className="flex flex-wrap items-baseline gap-x-2">
           <CountUp value={t.spent} format={baht} className="display text-3xl" />
           {expected > 0 && (
-            <span className={cn('ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold', bad ? 'bg-neg/15 text-neg' : 'bg-pos/15 text-pos')}>{status}</span>
+            <span className={cn('num ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold', over ? 'bg-neg/15 text-neg' : 'bg-pos/15 text-pos')}>
+              {baht(Math.abs(diff))} {over ? 'over' : 'saved'}</span>
           )}
         </div>
         {!expected ? (
@@ -258,16 +261,30 @@ export function MonthSpend({ plan, onPlan }: { plan: PlanItem[]; onPlan: () => v
               Set expected spending</button>
           </div>
         ) : <>
-          <div className="relative flex h-9 items-end gap-[3px]" aria-label={`${Math.round(ratio * 100)}% of expected spending used`} role="img">
-            {Array.from({ length: TICKS }, (_, i) => (
-              <span key={i} className={cn('tick h-7 flex-1 rounded-full', i < filled ? (bad ? 'bg-neg' : 'bg-expense') : 'bg-muted', i === pace && 'h-9 ring-2 ring-foreground/30')}
-                style={{ animationDelay: `${i * 16}ms` }} />
-            ))}
+          <div>
+            <div className="relative py-1.5" role="img"
+              aria-label={`Spent ${baht(t.spent)} of ${baht(expected)} expected this month; expected by today ${baht(dueNow)}, ${baht(Math.abs(diff))} ${over ? 'over' : 'saved'}`}>
+              <div className="relative h-3.5 overflow-hidden rounded-full bg-muted dark:bg-foreground/12">
+                <div className="bar-in absolute inset-y-0 left-0 bg-expense" style={{ width: `${at(Math.min(t.spent, dueNow))}%` }} />
+                {over && <div className="bar-in absolute inset-y-0 bg-neg" style={{ left: `${line}%`, width: `${at(t.spent) - line}%`, animationDelay: '0.45s' }} />}
+              </div>
+              {/* the line: expected by today, taller than the bar, with a gap in the card colour on both sides */}
+              <div className="absolute inset-y-0 w-1 -translate-x-1/2 rounded-full bg-foreground ring-2 ring-card" style={{ left: `${line}%` }} />
+            </div>
+            <div className="relative h-5 text-xs text-muted-foreground">
+              <span className={cn('absolute top-1 whitespace-nowrap', line < 20 ? '' : line > 80 ? '-translate-x-full' : '-translate-x-1/2')}
+                style={{ left: `${line}%` }}>Expected by today <b className="num text-foreground">{baht(dueNow)}</b></span>
+            </div>
           </div>
-          <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
-            <span>Used <b className="num text-foreground">{Math.round(ratio * 100)}%</b> of expected, <b className="num text-foreground">{Math.round(t.elapsed * 100)}%</b> of the month gone · outlined tick = today</span>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-muted-foreground">
+            <span>
+              {over
+                ? <><b className="num text-neg">{baht(diff)}</b> more than expected by day {dayGone} of {t.days}</>
+                : <><b className="num text-pos">{baht(-diff)}</b> saved: under what's expected by day {dayGone} of {t.days}</>}
+              {t.spent > expected && <> · <b className="num text-neg">{baht(t.spent - expected)}</b> past the whole month's</>}
+            </span>
             <button type="button" onClick={onPlan} className="underline-offset-4 hover:text-foreground hover:underline">
-              Expected spending <b className="num text-foreground">{baht(expected)}</b></button>
+              Expected this month <b className="num text-foreground">{baht(expected)}</b></button>
           </div>
           {keys.size > 0 && (
             <p className="text-xs text-muted-foreground">
@@ -381,7 +398,9 @@ export function RecentTx({ rows }: { rows: Tx[] }) {
 // Daily money out as bars over the last 7 / 30 / 90 days of records, money in and out totals on top.
 export function MoneyMovement() {
   const [n, setN] = useState<'7' | '30' | '90'>('30')
-  const days = useMemo(() => daily(+n), [n])
+  const v = useLedger()
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- v: the data the helper reads changed (live swap)
+  const days = useMemo(() => daily(+n), [n, v])
   const tin = days.reduce((a, d) => a + d.in, 0), tout = days.reduce((a, d) => a + d.out, 0)
   const avg = tout / days.length
   const busiest = days.reduce((m, d) => (d.out > m.out ? d : m), days[0])

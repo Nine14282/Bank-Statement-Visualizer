@@ -157,21 +157,24 @@
 }
 
 /* New transaction rows (tx-table.tsx): slide in and fade a violet highlight. */
-@keyframes tx-new {
-  from { background-color: color-mix(in oklab, var(--primary) 35%, transparent); transform: translateY(-6px); opacity: 0; }
-  15%  { opacity: 1; transform: none; }
+/* A new row (tx-table.tsx; also when a rebuild swaps data in live): slides in from the left, then glows and fades.
+   Reduced motion keeps the glow only, so the new row is still marked; not in the app window, whose reduced motion is
+   app.py's speed setting rather than the user's. */
+@keyframes tx-slide { from { transform: translateX(-48px); opacity: 0; } }
+@keyframes tx-glow {
+  from { background-color: color-mix(in oklab, var(--primary) 35%, transparent); }
   to   { background-color: transparent; }
 }
-.tx-new { animation: tx-new 3s ease-out; }
-@media (prefers-reduced-motion: reduce) { .tx-new { animation: none; } }
+.tx-new { animation: tx-slide 0.7s cubic-bezier(0.16, 1, 0.3, 1), tx-glow 4s ease-out; }   /* no fill: a finished slide must not lock transform (the push-down, tx-table.tsx) */
+@media (prefers-reduced-motion: reduce) { :root:not(.in-app) .tx-new { animation: tx-glow 4s ease-out; } }   /* .in-app: main.tsx */
 
 /* Ambient glow behind the greeting (App.tsx): two still, blurred blobs in the accent colours. */
 .glow { position: absolute; border-radius: 9999px; filter: blur(80px); opacity: 0.22; pointer-events: none; }
 .dark .glow { opacity: 0.16; }
-/* Segmented progress (widgets.tsx): ticks fill one after another. */
-@keyframes tick-in { from { transform: scaleY(0.3); opacity: 0; } }
-.tick { animation: tick-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
-@media (prefers-reduced-motion: reduce) { :root:not(.arriving) .tick { animation: none; } }   /* .arriving: main.tsx */
+/* Filled bar (widgets.tsx MonthSpend): grows in from the left. */
+@keyframes bar-in { from { transform: scaleX(0); } }
+.bar-in { transform-origin: left; animation: bar-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@media (prefers-reduced-motion: reduce) { :root:not(.arriving) .bar-in { animation: none; } }   /* .arriving: main.tsx */
 /* The app window's entrance after an update (.arriving, main.tsx): the top bar and nav rail appear too; cards, charts
    and figures animate through Motion. `transform` only: the nav rail keeps its own centring in `translate`. */
 @keyframes appear { from { opacity: 0; transform: translateY(-8px); } }

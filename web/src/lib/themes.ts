@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useColorScheme } from '@mui/material/styles'
 import { META } from '@/lib/ledger'
+import { APP, bridge } from '@/lib/utils'
 
 // Theme registry. A theme = light or dark base tokens (index.css :root/.light and .dark) plus, optionally, its own
 // [data-theme="<id>"] block in index.css overriding any of them. Adding a theme = one entry here (+ that CSS block).
@@ -37,6 +38,7 @@ export function useTheme() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme.id
     setMode(theme.mode)
+    if (APP) void bridge().then((b) => b.theme(theme.mode))   // the window starts in this colour next time (app.py)
   }, [theme, setMode])
   const pick = (next: string) => {
     try { localStorage.setItem(STORE, JSON.stringify({ id: next, base: BASE })) } catch { /* storage blocked */ }

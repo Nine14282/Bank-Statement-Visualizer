@@ -7,17 +7,20 @@ import { PayeeAvatar, Segmented } from '@/components/ledger/widgets'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { OWN, RULES, TX, baht, payeeKey, payees, ruleFor, rowsFor, saveRules, type Rule, type Tx } from '@/lib/ledger'
+import { OWN, RULES, baht, onData, payeeKey, payees, ruleFor, rowsFor, saveRules, useLedger, type Rule, type Tx } from '@/lib/ledger'
 import { EASE } from '@/lib/utils'
 
 // Per label rule: every row containing its text, and how many of them another (more specific) label takes. Module level,
 // not in the render: rules only change by saving, which reloads the page, and this scans the whole ledger per rule.
-const RULE_STATS = RULES.map((r) => {
+// Recomputed when a rebuild swaps in new data.
+const ruleStats = () => RULES.map((r) => {
   const rows = rowsFor(r)
   const won = rows.filter((t) => ruleFor(t.desc) === r).length
   const taker = rows.find((t) => ruleFor(t.desc) !== r)
   return { r, rows, won, by: taker && ruleFor(taker.desc) }
 })
+let RULE_STATS = ruleStats()
+onData(() => { RULE_STATS = ruleStats() })
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 
 // "Custom Your Transaction" tab: every payee (money out) or payer (money in), with the same label editor the
@@ -25,7 +28,8 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 export function CustomTab() {
   const [dir, setDir] = useState<'out' | 'in'>('out')
   const [q, setQ] = useState('')
-  const all = useMemo(() => payees(TX, Infinity, dir === 'in', true), [dir])
+  const rows = useLedger()
+  const all = useMemo(() => payees(rows, Infinity, dir === 'in', true), [dir, rows])
   const list = useMemo(() => {
     const t = q.trim().toLowerCase()
     return t ? all.filter((p) => `${p.name} ${p.key} ${p.last.desc} ${p.last.cat}`.toLowerCase().includes(t)) : all
@@ -37,7 +41,7 @@ export function CustomTab() {
   const labeled = all.filter((x) => x.last.label).length
 
   // Search matches in the other direction, so a payee filed under Money in isn't "missing" while Money out is shown.
-  const other = useMemo(() => payees(TX, Infinity, dir !== 'in', true), [dir])
+  const other = useMemo(() => payees(rows, Infinity, dir !== 'in', true), [dir, rows])
   const ql = q.trim().toLowerCase()
   const elsewhere = ql ? other.filter((p) => `${p.name} ${p.key} ${p.last.desc} ${p.last.cat}`.toLowerCase().includes(ql)).length : 0
 

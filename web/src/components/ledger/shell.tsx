@@ -9,7 +9,7 @@ import { Bell, Check, CircleCheck, Copy, Download, Moon, Settings, Sun, Upload }
 import { SECTIONS, goTo, type Tab } from '@/lib/nav'
 import { THEMES, type useTheme } from '@/lib/themes'
 import { META, bankName, baht, toCsv, type Tx } from '@/lib/ledger'
-import { cn } from '@/lib/utils'
+import { APP, bridge, cn } from '@/lib/utils'
 
 // Icon nav: a floating vertical rail on desktop, a bottom bar on phones. The lit pill slides between items.
 export function Nav({ active, mobile }: { active: string; mobile?: boolean }) {
@@ -35,7 +35,9 @@ export function Nav({ active, mobile }: { active: string; mobile?: boolean }) {
   )
 }
 
-function download(rows: Tx[], name: string) {
+// In the app window a page download goes nowhere (pywebview turns them off): app.py asks where to save it instead.
+async function download(rows: Tx[], name: string) {
+  if (APP) return void (await bridge()).save(name, toCsv(rows))
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }))
   a.download = name
