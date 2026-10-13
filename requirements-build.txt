@@ -1,0 +1,4 @@
+# Only to build the standalone program (statement-visualizer.spec), on top of requirements.txt. The build installs
+# from requirements-build.lock (exact versions + hashes of both files' packages and all their dependencies); refresh it
+# after changing this file or requirements.txt (the command is at the top of the lock file).
+pyinstaller==6.22.3

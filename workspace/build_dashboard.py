@@ -20,14 +20,15 @@ import time
 
 import config  # loads the project's env settings into os.environ
 
-# Anchor paths to this script's folder so it runs from any working directory.
-HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
-ROOT = os.path.dirname(HERE)                         # project root
+# Absolute paths (config.py), so it runs from any working directory.
+HERE = config.WORK                                   # workspace/
+ROOT = config.ROOT                                   # project root
 
 CSV = os.path.join(HERE, "ledger.csv")
 WEB = os.path.join(ROOT, "web")
-SHELL = os.path.join(WEB, "prebuilt", "index.html")   # the app without data: `npm run build` in web/ makes it
-JSON_OUT = os.path.join(WEB, "src", "data", "ledger.json")   # for the dev server only
+SHELL = os.path.join(config.APP, "web", "prebuilt", "index.html")   # the app without data: `npm run build` in web/
+# For the dev server only; the PyInstaller build has none, so it doesn't write this extra copy of your ledger there.
+JSON_OUT = None if config.FROZEN else os.path.join(WEB, "src", "data", "ledger.json")
 OUT = os.path.join(WEB, "dist", "index.html")      # the dashboard
 LINK = os.path.join(ROOT, "Dashboard.html")         # one double-click from the project folder; forwards to OUT
 # The placeholder in web/index.html (and so in the prebuilt page) that the data replaces; same text in vite.config.ts.
@@ -100,7 +101,7 @@ def build(csv_path: str = CSV) -> None:
 
     ids = [r["ID"] for r in rows if r.get("ID")]
     if len(ids) != len(set(ids)):
-        print(f"  WARNING: {len(ids) - len(set(ids))} duplicate transaction ID(s) in ledger.csv; re-run ./run.sh")
+        print(f"  WARNING: {len(ids) - len(set(ids))} duplicate transaction ID(s) in ledger.csv; re-run {config.command('run')}")
 
     tx = [{"date": r["Date"], "desc": r["Description"], "cat": r["Category"],
            "amt": round(float(r["Amount"]), 2), "bal": round(float(r["Balance"]), 2) if r["Balance"] else None,
@@ -112,9 +113,10 @@ def build(csv_path: str = CSV) -> None:
                         "to": tx[-1]["date"] if tx else "", "n": len(tx), "gaps": gaps,
                         "theme": os.environ.get("THEME", ""), "plan": expected()},
                "tx": tx}
-    os.makedirs(os.path.dirname(JSON_OUT), exist_ok=True)
-    with open(JSON_OUT, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False)
+    if JSON_OUT:
+        os.makedirs(os.path.dirname(JSON_OUT), exist_ok=True)
+        with open(JSON_OUT, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
 
     if not tx:
         print("ledger.csv has no transactions yet: building the blank dashboard.")
@@ -136,6 +138,8 @@ def build(csv_path: str = CSV) -> None:
     try:
         shell = open(SHELL, encoding="utf-8").read()
     except OSError:
+        if config.FROZEN:
+            sys.exit(f"Missing {SHELL}: this copy of the program is incomplete. Download or build it again.")
         sys.exit(f"Missing {SHELL}: it ships with the project. Restore it (git checkout web/prebuilt) or, if you "
                  "changed the web app, run `npm install && npm run build` in web/ (needs Node.js 20+).")
     # Which build of the app's own code this is: an open page swaps in new data, but reloads when this differs from

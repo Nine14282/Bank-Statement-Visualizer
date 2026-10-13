@@ -29,6 +29,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import sys
 import threading
 import webbrowser
@@ -44,7 +45,6 @@ from extract_ledger import BANKS, BY_ID, bank_from_name, bank_from_text, extract
 import update_statement
 from update_statement import candidates
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 MARK = "\033[1;35m▸\033[0m" if sys.stdout.isatty() else "▸"   # as in run.sh: bold violet on a terminal
 
 
@@ -55,9 +55,9 @@ def say(msg: str) -> None:
 
 def note(msg: str) -> None:
     print(f"  {msg}", flush=True)
-STATEMENTS = os.path.join(os.path.dirname(HERE), "Statement")
+STATEMENTS = os.path.join(config.ROOT, "Statement")
 ADD = "--add" in sys.argv[1:]                          # the short "add statements" page, not the full setup
-AGAIN = "./run.sh" if ADD else "./run.sh --setup"     # what gives a fresh page
+AGAIN = config.command("run") + ("" if ADD else " --setup")   # what gives a fresh page
 TOKEN = secrets.token_urlsafe(24)       # one-time: in the printed link, good for the first visit only
 SESSION = secrets.token_urlsafe(32)     # the cookie that visit gets; never printed or put in a URL
 TOKEN_USED = threading.Event()
@@ -267,6 +267,18 @@ def handle(path: str, name: str, body: bytes, server=None) -> dict | None:
     return None
 
 
+class Server(ThreadingHTTPServer):
+    """The page's server, its port for this program alone. http.server turns on SO_REUSEADDR, which on Windows lets
+    another program (another account's too) bind the same 127.0.0.1 port and take the one-time link's visit. A random
+    port (0) needs no reuse; Windows also gets SO_EXCLUSIVEADDRUSE."""
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "LedgerSetup"
 
@@ -370,7 +382,7 @@ def main() -> int:
     build()                 # make sure web/dist/index.html (which holds the wizard) is current
     say("Looking at the statements already in Statement/")
     scan()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = Server(("127.0.0.1", 0), Handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/?setup={TOKEN}"
     say(f"{page} is ready (this computer only). Opening it in your browser…")
     note(f"If it didn't open, go to: {url}")

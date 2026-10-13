@@ -13,6 +13,6 @@
 #   KTB_PW=... KBANK_PW=... ./run.sh --rebuild   or keep the passwords in .env (the pages can save them there)
 #   ./run.sh --password=...       rebuild with this password (visible in shell history)
 #
-# The work is done by workspace/launcher.py, the same on Windows (run.cmd).
+# The work is done by workspace/launcher.py, also the entry point of the Windows program (StatementVisualizer.exe run).
 command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
 exec python3 "$(dirname "$0")/workspace/launcher.py" run "$@"

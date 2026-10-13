@@ -9,6 +9,6 @@
 # (macOS). Nothing opens: use the app when you want to, from your app menu or with ./run.sh. Everything after that
 # (adding statements, passwords, theme, expected spending) happens in the app. Remove it again with ./uninstall.sh.
 #
-# The work is done by workspace/launcher.py, the same on Windows (install.cmd).
+# The work is done by workspace/launcher.py, also the entry point of the Windows program (StatementVisualizer.exe install).
 command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
 exec python3 "$(dirname "$0")/workspace/launcher.py" install "$@"

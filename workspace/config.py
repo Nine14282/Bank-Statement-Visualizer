@@ -5,13 +5,51 @@ line like `STATEMENT_PW=` in .env.example means "not set". Format: KEY=value, on
 `#` comment lines, optional `export ` prefix, optional quotes. No inline comments.
 
 Every script imports this first; see .env.example for the settings.
+
+Where things live. From source: everything in the project folder. In the PyInstaller build (statement-visualizer.spec):
+your data next to the .exe (ROOT, the same layout: Statement/, workspace/, web/dist/, .env), and the program's own
+files inside the bundle (APP: web/prebuilt/index.html, .env.example), read-only.
 """
 import os
+import sys
 
 os.umask(0o077)   # ledger, dashboard and cache are private even when a script is run by hand
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FROZEN = bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
+HERE = os.path.dirname(os.path.abspath(__file__))   # the scripts (from source)
+ROOT = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(HERE)   # your data
+WORK = os.path.join(ROOT, "workspace")              # ledger, caches, Gmail login
+APP = sys._MEIPASS if FROZEN else ROOT              # shipped files
 ENVFILE = os.path.join(ROOT, ".env")
+# The scripts the build can run as its own subprocesses (launcher.py's --script); nothing else is accepted.
+SCRIPTS = ("app", "build_dashboard", "extract_ledger", "fetch_gmail", "txid", "update_statement", "welcome")
+
+if FROZEN and sys.platform.startswith("linux"):
+    # The bootloader points LD_LIBRARY_PATH at the bundle; a system program started from here (xdg-open, the browser)
+    # must get the system's libraries back. This process already loaded its own, and a copy of the build started from
+    # here sets it again itself. Windows and macOS don't use it (PyInstaller docs, "Launching External Programs").
+    if "LD_LIBRARY_PATH_ORIG" in os.environ:
+        os.environ["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH_ORIG"]
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
+
+
+def script(name: str, *args: str) -> list[str]:
+    """The command line that runs one of SCRIPTS in its own process: python name.py from source; in the build, the
+    .exe again, which runs it (launcher.py)."""
+    if name not in SCRIPTS:
+        raise ValueError(f"not a script: {name}")
+    if FROZEN:
+        return [sys.executable, "--script", name, *args]
+    return [sys.executable, os.path.join(HERE, name + ".py"), *args]
+
+
+def command(name: str) -> str:
+    """How to type one of the project's commands (run, gmail, ...): the .exe in the build, else ./run.sh (from source on
+    Windows: the launcher itself)."""
+    if FROZEN:   # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
+        return f"{'.' + os.sep if os.name == 'nt' else './'}{os.path.basename(sys.executable)} {name}"
+    return rf"py workspace\launcher.py {name}" if os.name == "nt" else f"./{name}.sh"
 
 
 def load_env() -> None:

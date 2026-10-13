@@ -24,6 +24,7 @@ Defaults: Statement/ -> ledger.csv -> web/dist/index.html
 """
 import contextlib
 import csv
+import functools
 import getpass
 import glob
 import hashlib
@@ -42,9 +43,9 @@ from banks import manual_bank
 from extract_ledger import BANKS, BY_ID, bank_from_name, extract, write_csv
 from txid import differences, stamp_ids
 
-# Anchor paths to this script's folder so it runs from any working directory.
-HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
-ROOT = os.path.dirname(HERE)                         # project root
+# Absolute paths (config.py), so it runs from any working directory.
+HERE = config.WORK                                   # workspace/
+ROOT = config.ROOT                                   # project root
 
 # Parsed rows per PDF, so an update only reads statements it hasn't read before (re-reading all 9 took ~40 s). An entry
 # is keyed by the file's bytes plus everything else that shapes its rows: the parser code (extract_ledger.py + banks/),
@@ -81,11 +82,29 @@ def why(e):
     return type(e).__name__ + (f": {', '.join(inner)}" if inner else "")
 
 
+@functools.cache
+def parser_code() -> tuple[bytes, ...]:
+    """The parser code's hashes, for the cache key: its source files; in the PyInstaller build (no sources), the .exe,
+    which holds all the code (so a new build reads every PDF again, once)."""
+    if config.FROZEN:
+        files = [sys.executable]
+    else:
+        files = [os.path.join(config.HERE, "extract_ledger.py"),
+                 *sorted(glob.glob(os.path.join(config.HERE, "banks", "*.py")))]
+    out = []
+    for f in files:
+        with open(f, "rb") as fh:
+            out.append(hashlib.sha256(fh.read()).digest())
+    return tuple(out)
+
+
 def cache_entry(path) -> str:
-    code = [os.path.join(HERE, "extract_ledger.py"), *sorted(glob.glob(os.path.join(HERE, "banks", "*.py")))]
-    parts = [open(path, "rb").read(), *(open(f, "rb").read() for f in code),
-             pdfplumber.__version__.encode(), *(os.environ.get(k, "").encode() for k in CACHE_SETTINGS)]
-    key = hashlib.sha256(b"".join(hashlib.sha256(p).digest() for p in parts)).hexdigest()[:40]
+    with open(path, "rb") as f:
+        pdf = f.read()
+    parts = [pdf, pdfplumber.__version__.encode(), *(os.environ.get(k, "").encode() for k in CACHE_SETTINGS)]
+    digests = [hashlib.sha256(p).digest() for p in parts]
+    digests[1:1] = parser_code()     # after the PDF's: the same key as when the files were hashed here one by one
+    key = hashlib.sha256(b"".join(digests)).hexdigest()[:40]
     USED.add(key)
     return os.path.join(CACHE, key + ".json")
 
@@ -143,7 +162,8 @@ def read_pdf(path):
     if not sys.stdin.isatty():      # the Gmail listener / a script: nobody to ask. Stop rather than write a ledger missing this file.
         keys = " / ".join(b.passwords[0] for b in BANKS)
         sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
-                 "in the env settings (see .env.example), run ./run.sh --setup, or run this by hand to type it. "
+                 f"in the env settings (see .env.example), run {config.command('run')} --setup, or run this by hand to "
+                 "type it. "
                  "Ledger left unchanged.")
     named = bank_from_name(path)
     last = None

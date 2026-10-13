@@ -8,6 +8,6 @@
 # --listen is the only automatic fetch (nothing runs on a schedule). It has nobody to type PDF passwords: put
 # KTB_PW / KBANK_PW in .env first, and run ./gmail.sh once by hand to authorise.
 #
-# The work is done by workspace/launcher.py, the same on Windows (gmail.cmd).
+# The work is done by workspace/launcher.py, also the entry point of the Windows program (StatementVisualizer.exe gmail).
 command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
 exec python3 "$(dirname "$0")/workspace/launcher.py" gmail "$@"

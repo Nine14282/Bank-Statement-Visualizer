@@ -10,6 +10,6 @@
 # Not removed: the app itself (./uninstall.sh does that) and the access you gave Google (revoke it at
 # https://myaccount.google.com/permissions). Labels you saved in a browser live in that browser: clear its site data.
 #
-# The work is done by workspace/launcher.py, the same on Windows (clear.cmd).
+# The work is done by workspace/launcher.py, also the entry point of the Windows program (StatementVisualizer.exe clear).
 command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
 exec python3 "$(dirname "$0")/workspace/launcher.py" clear "$@"

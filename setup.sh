@@ -4,6 +4,6 @@
 #   ./setup.sh [--app|--web]   --app: app window (pywebview + launcher); --web: browser only. Default: the mode already
 #                              installed (.venv/mode), else app.
 #
-# The work is done by workspace/launcher.py (Windows has install.cmd; then run.cmd opens the app).
+# The work is done by workspace/launcher.py (on Windows: the StatementVisualizer.exe program, see README).
 command -v python3 >/dev/null 2>&1 || { echo "Missing: python3. Install Python 3.10 or newer." >&2; exit 1; }
 exec python3 "$(dirname "$0")/workspace/launcher.py" setup "$@"

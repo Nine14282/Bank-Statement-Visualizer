@@ -19,9 +19,10 @@ import sys
 import threading
 from pathlib import Path
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PAGE = Path(HERE).parent / "web" / "dist" / "index.html"
-STORE = os.path.join(HERE, ".app")   # the window's browser storage (Linux)
+import config  # loads the project's env settings into os.environ
+
+PAGE = Path(config.ROOT) / "web" / "dist" / "index.html"
+STORE = os.path.join(config.WORK, ".app")   # the window's browser storage (Linux)
 # Where the window kept the page's localStorage before Qt (WebKitGTK, until 2026-10). Moved over once, then renamed.
 WEBKIT_STORE = os.path.join(STORE, "localstorage", "file__0.localstorage")
 
@@ -159,7 +160,7 @@ def start_listener(window):
         return None
     import subprocess
     os.makedirs(STORE, exist_ok=True)
-    listener = subprocess.Popen([sys.executable, os.path.join(HERE, "fetch_gmail.py"), "--listen"],
+    listener = subprocess.Popen(config.script("fetch_gmail", "--listen"),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 encoding="utf-8", errors="replace", env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
@@ -183,7 +184,6 @@ def only_window():
     updates (one Gmail listener runs) and could build at the same time. Returns the lock, held while this process
     runs, or None when another window has it. ponytail: no raising the open window (Wayland won't let an app take
     focus anyway); the second launch just says so."""
-    import config
     os.makedirs(STORE, exist_ok=True)
     lock = open(os.path.join(STORE, "window.lock"), "w")
     if config.lock(lock, wait=False):
@@ -244,7 +244,6 @@ def main() -> int:
             QApplication.setApplicationName("statement-visualizer")
             QApplication.setDesktopFileName("statement-visualizer")
         import webview
-        import config   # the settings file, for THEME
         bg = start_colour()
         state = window_state()
         w = webview.create_window("Statement Visualizer", url + "?app", width=state["width"], height=state["height"],

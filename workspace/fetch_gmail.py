@@ -57,14 +57,15 @@ API = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 WATCH = "https://gmail.googleapis.com/gmail/v1/users/me/watch"
 PUBSUB = "https://pubsub.googleapis.com/v1"
 
-# Anchor paths to this script's folder so it runs from any working directory.
-HERE = os.path.dirname(os.path.abspath(__file__))   # workspace/
-ROOT = os.path.dirname(HERE)                         # project root
+# Absolute paths (config.py), so it runs from any working directory.
+HERE = config.WORK                                   # workspace/
+ROOT = config.ROOT                                   # project root
 
 OUTDIR = os.path.join(ROOT, "Statement")            # PDFs land in root/Statement
 TOKEN = os.path.join(HERE, "token.json")
 SEEN = os.path.join(HERE, ".gmail_seen.json")
 LOCK = os.path.join(HERE, ".gmail.lock")             # one fetch at a time (pull)
+LISTEN_LOCK = os.path.join(HERE, ".gmail-listen.lock")   # one listener at a time (listen)
 
 
 def client_config():
@@ -107,7 +108,8 @@ def service(interactive=False):
                 creds = None
         if not creds or not creds.valid:
             if not (interactive or sys.stdin.isatty()):      # the listener: nobody to click through the browser
-                sys.exit("Gmail login missing or expired: run ./gmail.sh by hand once to sign in again.")
+                sys.exit(f"Gmail login missing or expired: run {config.command('gmail')} by hand once to sign in "
+                         "again.")
             flow = InstalledAppFlow.from_client_config(client_config(), SCOPES)
             creds = flow.run_local_server(port=0)
         fd = os.open(TOKEN, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -417,7 +419,7 @@ def listen(build):
 
     if not (TOPIC and SUBSCRIPTION and PROJECT):
         sys.exit(LISTEN_HELP)
-    me = open(__file__)             # one listener at a time (the app window's and a service's): lock this script file
+    me = open(LISTEN_LOCK, "a")     # one listener at a time (the app window's and a service's)
     if not config.lock(me, wait=False):
         sys.exit("Another listener is already running.")
     state = {"busy": False, "stop": False}
@@ -446,8 +448,8 @@ def listen(build):
                 try:
                     # A fresh process per fetch: code updated after the listener started (a git pull, a fix) is used
                     # on the next email, without restarting the listener or the app window.
-                    done = subprocess.run([sys.executable, os.path.abspath(__file__), "--recent",
-                                           *([] if build else ["--no-build"])]).returncode == 0
+                    done = subprocess.run(config.script("fetch_gmail", "--recent",
+                                                        *([] if build else ["--no-build"]))).returncode == 0
                 finally:
                     state["busy"] = False
                 if not done:            # stays pending: retried after the usual back-off
@@ -463,7 +465,7 @@ def listen(build):
                 time.sleep(5)
             wait = 5
         except RefreshError:
-            sys.exit("Gmail login missing or expired: run ./gmail.sh by hand once to sign in again.")
+            sys.exit(f"Gmail login missing or expired: run {config.command('gmail')} by hand once to sign in again.")
         except (requests.RequestException, TransportError) as e:   # TransportError: the login refresh, offline
             code = getattr(getattr(e, "response", None), "status_code", None)
             if code in (400, 401, 403, 404):    # wrong name, missing permission or scope: retrying won't help
