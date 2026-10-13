@@ -1,0 +1,67 @@
+# The Windows program: builds dist/StatementVisualizer/ with PyInstaller (statement-visualizer.spec), runs the
+# self-checks and a fresh install with the built .exe, and uploads StatementVisualizer-windows.zip as an artifact
+# named after the commit. PyInstaller doesn't cross-compile, so the .exe is built here, on Windows. Actions are pinned
+# to commit SHAs; the Python packages come from requirements-build.lock, hash-checked.
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["workspace/**", "web/prebuilt/**", "statement-visualizer.spec", "requirements*", ".env.example",
+            ".github/workflows/windows-build.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          # The page ships without data: the ledger only ever enters through this placeholder (CLAUDE.md).
+          if (-not (Select-String -Quiet -SimpleMatch -Path web\prebuilt\index.html `
+                    -Pattern '<script id="ledger-data" type="application/json">null</script>')) {
+            throw "web/prebuilt/index.html lost its empty ledger-data placeholder"
+          }
+          python -m pip install --require-hashes -r requirements-build.lock
+          if ($LASTEXITCODE) { throw "pip install failed ($LASTEXITCODE)" }
+          pyinstaller --clean --noconfirm statement-visualizer.spec
+          if ($LASTEXITCODE) { throw "pyinstaller failed ($LASTEXITCODE)" }
+
+      - name: Self-checks and a fresh install, with the built program
+        run: |
+          # A copy elsewhere, as a user would unpack it: its data folders start empty.
+          $app = Join-Path $env:RUNNER_TEMP "StatementVisualizer"
+          Copy-Item -Recurse dist\StatementVisualizer $app
+          $exe = Join-Path $app "StatementVisualizer.exe"
+          foreach ($check in @("txid", "extract_ledger --selfcheck", "build_dashboard --selfcheck",
+                               "update_statement --selfcheck", "welcome --selfcheck", "fetch_gmail --selfcheck")) {
+            Write-Output "== $check"
+            & $exe --script @($check -split " ")
+            if ($LASTEXITCODE) { throw "$check failed ($LASTEXITCODE)" }
+          }
+          & $exe install
+          if ($LASTEXITCODE) { throw "install failed ($LASTEXITCODE)" }
+          if (-not (Test-Path (Join-Path $app "web\dist\index.html"))) { throw "install built no dashboard" }
+          & $exe --script os
+          if (-not $LASTEXITCODE) { throw "--script ran a name outside config.SCRIPTS" }
+          exit 0
+
+      - name: Package
+        run: Compress-Archive -Path dist\StatementVisualizer -DestinationPath StatementVisualizer-windows.zip
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: StatementVisualizer-windows-${{ github.sha }}
+          path: StatementVisualizer-windows.zip
+          if-no-files-found: error
