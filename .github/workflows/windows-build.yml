@@ -1,6 +1,8 @@
 # The Windows program: builds dist/StatementVisualizer/ with PyInstaller (statement-visualizer.spec), runs the
-# self-checks and a fresh install with the built .exe, and uploads StatementVisualizer-windows.zip as an artifact
-# named after the commit. PyInstaller doesn't cross-compile, so the .exe is built here, on Windows. Actions are pinned
+# self-checks and a fresh install with the built .exe, wraps it in StatementVisualizer-Setup.exe (Inno Setup,
+# statement-visualizer.iss, preinstalled on GitHub's Windows images) and uploads that and StatementVisualizer-windows.zip
+# as an artifact named after the commit. A pushed v* tag (e.g. v1.0.0) also publishes both on a GitHub release, so the
+# download link stays the same: releases/latest/download/StatementVisualizer-Setup.exe. PyInstaller doesn't cross-compile, so the .exe is built here, on Windows. Actions are pinned
 # to commit SHAs; the Python packages come from requirements-build.lock, hash-checked.
 name: Windows build
 
@@ -8,6 +10,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*"]   # path filters don't apply to tag pushes
     paths: ["workspace/**", "web/prebuilt/**", "statement-visualizer.spec", "requirements*", ".env.example",
             ".github/workflows/windows-build.yml"]
 
@@ -58,10 +61,39 @@ jobs:
           exit 0
 
       - name: Package
-        run: Compress-Archive -Path dist\StatementVisualizer -DestinationPath StatementVisualizer-windows.zip
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          Compress-Archive -Path dist\StatementVisualizer -DestinationPath StatementVisualizer-windows.zip
+          # Inno Setup wants a plain version: the tag's (v1.2.3 -> 1.2.3), else 0.0.0 for a build of main.
+          $version = if ($env:REF -match '^refs/tags/v(\d+(\.\d+){0,3})$') { $Matches[1] } else { "0.0.0" }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" statement-visualizer.iss
+          if ($LASTEXITCODE) { throw "ISCC failed ($LASTEXITCODE)" }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: StatementVisualizer-windows-${{ github.sha }}
-          path: StatementVisualizer-windows.zip
+          path: |
+            StatementVisualizer-windows.zip
+            dist/StatementVisualizer-Setup.exe
           if-no-files-found: error
+
+  release:
+    # Its own job: only this one can write to the repo, and it runs none of the build's code.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: StatementVisualizer-windows-${{ github.sha }}
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        # The artifact keeps the paths it was uploaded with: the Setup under dist/.
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes \
+            dist/StatementVisualizer-Setup.exe StatementVisualizer-windows.zip
