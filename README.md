@@ -19,7 +19,7 @@ statement PDFs. See [Install](#install) and [Get started](#get-started).
 
 | | |
 |---|---|
-| **OS** | **Linux** (tested). **macOS**: written for but untested, so expect rough edges (a fresh Mac's system Python is often 3.9, so install Python 3.10+ from Homebrew or python.org first). **Windows** 10/11: a standalone program in browser mode, no Python needed (see [Windows](#windows)), not yet tested on a real Windows PC. |
+| **OS** | **Linux** (tested). **macOS**: written for but untested, so expect rough edges (a fresh Mac's system Python is often 3.9, so install Python 3.10+ from Homebrew or python.org first). **Windows** 10/11: an installer (`StatementVisualizer-Setup.exe`) for a standalone program in browser mode, no Python needed (see [Windows](#windows)), not yet tested on a real Windows PC. |
 | **Python** | 3.10 or newer, with `venv`. Debian/Ubuntu: `sudo apt install python3 python3-venv`. |
 | **Internet** | for the first install (pip downloads a few packages and their dependencies) and for the optional Gmail download. Nothing else is ever sent anywhere. |
 | **App window** (Linux, optional) | Qt's web view (PyQt6), installed by pip into `.venv/`: a ~200 MB download, ~550 MB on disk. On an X11 desktop (not Wayland) also `sudo apt install libxcb-cursor0`. Without it everything works in your browser instead (or install with `./install.sh --web`, which skips the download). macOS needs nothing extra. |
@@ -354,26 +354,33 @@ so no Python is needed. It runs in **browser mode**: the setup and add-statement
 browser (the app window comes later). Not yet tested on a real Windows PC, so expect rough edges and please report
 them.
 
-1. Get the program: the `StatementVisualizer-windows-<commit>` artifact of the latest
-   [Windows build](https://github.com/Nine14282/Income-and-Expenses-Dashboard/actions/workflows/windows-build.yml) run
-   on `main` (you must be signed in to GitHub; artifacts are kept 90 days). GitHub downloads it as a zip holding
-   `StatementVisualizer-windows.zip`; extract that one too. Or build it yourself (below).
-2. Put the `StatementVisualizer` folder somewhere of yours, in a folder of its own, e.g.
-   `Documents\StatementVisualizer`. Your statements, ledger and settings are saved next to the `.exe` (the same
-   `Statement\`, `workspace\` and `.env` layout as above), so: not `Program Files` (not writable), not loose on the
-   Desktop or in Downloads (it refuses, since `clear` and `uninstall` delete there), and not a new folder at `C:\` (other
-   accounts on the PC could read it; it warns outside your user folder).
-3. Double-click **`StatementVisualizer.exe`**: the first time it opens the setup page, later the add-statements page.
-   Keep its window open while you use the page.
+1. Download **`StatementVisualizer-Setup.exe`** from the
+   [latest release](https://github.com/Nine14282/Income-and-Expenses-Dashboard/releases/latest/download/StatementVisualizer-Setup.exe).
+2. Run it. Windows may warn about an unrecognised app the first time: the program isn't code-signed. Click **More
+   info**, then **Run anyway**. It installs for your account only (no admin) into
+   `%LOCALAPPDATA%\Programs\Statement Visualizer` and adds **Statement Visualizer** to the Start Menu (and a desktop icon
+   if you tick it).
+3. At the end it opens the program: the first time, the setup page in your browser; later, the add-statements page.
+   Keep its console window open while you use the page.
+
+Your statements, ledger and settings are saved in the program's folder (the same `Statement\`, `workspace\` and
+`.env` layout as above). **Updating:** run a newer `StatementVisualizer-Setup.exe`; it replaces the program and keeps
+your data. The first run after an update reads every PDF once more (its parse cache is per program version).
+**Removing:** Settings > Apps > Statement Visualizer removes the program but leaves your data in that folder; to delete
+the data too, run `.\StatementVisualizer.exe uninstall --all` there first.
 
 The other commands, in a terminal (PowerShell or Command Prompt) in that folder: `.\StatementVisualizer.exe run
 --rebuild`, `.\StatementVisualizer.exe gmail` (`--listen`), `.\StatementVisualizer.exe clear`,
-`.\StatementVisualizer.exe uninstall` (it removes the files it made, and your data with `--all`, never the folder
-itself; then delete the folder by hand). Windows may warn about an unrecognised app the first time: the program isn't
-code-signed. More info, then Run anyway; or build it yourself.
+`.\StatementVisualizer.exe uninstall`.
 
-Updating: replace `StatementVisualizer.exe` and `_internal\` with the new ones and keep `Statement\`, `workspace\` and
-`.env`. The first update after a new version reads every PDF once more (its parse cache is per program version).
+**Without the installer** (portable): download `StatementVisualizer-windows.zip` from the same release and extract the
+`StatementVisualizer` folder into a folder of its own, e.g. `Documents\StatementVisualizer`; double-click
+`StatementVisualizer.exe` there. Not `Program Files` (not writable), not loose on the Desktop or in Downloads (it refuses,
+since `clear` and `uninstall` delete there), and not a new folder at `C:\` (other accounts on the PC could read it; it
+warns outside your user folder). To update, replace `StatementVisualizer.exe` and `_internal\` and keep `Statement\`,
+`workspace\` and `.env`. Builds of every `main` commit are under
+[Windows build](https://github.com/Nine14282/Income-and-Expenses-Dashboard/actions/workflows/windows-build.yml)
+(signed-in GitHub users, kept 90 days).
 
 The dashboard is `Dashboard.html` in that folder; open it in your browser. If an update says it can't write
 `ledger.csv`, close the file in Excel (Windows won't replace a file another program has open). Real-time Gmail
@@ -389,7 +396,9 @@ build-venv\Scripts\pyinstaller --clean --noconfirm statement-visualizer.spec
 ```
 
 The program is `dist\StatementVisualizer\`; copy that whole folder where you want it (don't use it inside `dist\`: it
-would keep your data there). From source without building, `py workspace\launcher.py run` (and `install`, `gmail`,
+would keep your data there). The installer as well, with [Inno Setup 6](https://jrsoftware.org/isinfo.php):
+`"%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" statement-visualizer.iss` writes `dist\StatementVisualizer-Setup.exe`.
+Maintainers: pushing a `v*` tag (e.g. `v1.0.0`) publishes both files on a GitHub release. From source without building, `py workspace\launcher.py run` (and `install`, `gmail`,
 ...) also works.
 
 ## Where things are
