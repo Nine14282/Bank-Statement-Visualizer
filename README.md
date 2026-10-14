@@ -28,8 +28,8 @@ statement PDFs. See [Install](#install) and [Get started](#get-started).
 ## Install
 
 ```bash
-git clone https://github.com/Nine14282/Income-and-Expenses-Dashboard.git
-cd Income-and-Expenses-Dashboard
+git clone https://github.com/Nine14282/Bank-Statement-Visualizer.git
+cd Bank-Statement-Visualizer
 ./install.sh          # the app window (default)
 ./install.sh --web    # or: browser only, no app window
 ```
@@ -151,7 +151,7 @@ hand instead, or to see what the script does, follow these steps in order:
    (`workspace/token.json`) from this computer but does not revoke it at Google.
 5. **Delete the project folder** (this also removes the `.venv`, so nothing was installed system-wide):
    ```bash
-   cd .. && rm -rf Income-and-Expenses-Dashboard
+   cd .. && rm -rf Bank-Statement-Visualizer
    ```
    Use your folder's real name. Check you are deleting the right folder first: `rm -rf` has no undo.
 6. **Optional leftovers**:
@@ -355,7 +355,7 @@ browser (the app window comes later). Not yet tested on a real Windows PC, so ex
 them.
 
 1. Download **`StatementVisualizer-Setup.exe`** from the
-   [latest release](https://github.com/Nine14282/Income-and-Expenses-Dashboard/releases/latest/download/StatementVisualizer-Setup.exe).
+   [latest release](https://github.com/Nine14282/Bank-Statement-Visualizer/releases/latest/download/StatementVisualizer-Setup.exe).
 2. Run it. Windows may warn about an unrecognised app the first time: the program isn't code-signed. Click **More
    info**, then **Run anyway**. It installs for your account only (no admin) into
    `%LOCALAPPDATA%\Programs\Statement Visualizer` and adds **Statement Visualizer** to the Start Menu (and a desktop icon
@@ -379,7 +379,7 @@ The other commands, in a terminal (PowerShell or Command Prompt) in that folder:
 since `clear` and `uninstall` delete there), and not a new folder at `C:\` (other accounts on the PC could read it; it
 warns outside your user folder). To update, replace `StatementVisualizer.exe` and `_internal\` and keep `Statement\`,
 `workspace\` and `.env`. Builds of every `main` commit are under
-[Windows build](https://github.com/Nine14282/Income-and-Expenses-Dashboard/actions/workflows/windows-build.yml)
+[Windows build](https://github.com/Nine14282/Bank-Statement-Visualizer/actions/workflows/windows-build.yml)
 (signed-in GitHub users, kept 90 days).
 
 The dashboard is `Dashboard.html` in that folder; open it in your browser. If an update says it can't write
