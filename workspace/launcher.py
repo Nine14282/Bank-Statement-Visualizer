@@ -593,8 +593,11 @@ def uninstall_build(all_, yes, dry):
                 pass
     if found:
         print("Some files are still there (see above)." if failed else "Removed.")
-    print(f"To remove the program too: close this window, then delete {os.path.basename(sys.executable)} and the "
-          f"_internal folder in {ROOT} (or that whole folder, if nothing else of yours is in it).")
+    if os.path.exists("unins000.exe"):   # installed with StatementVisualizer-Setup.exe (statement-visualizer.iss)
+        print("To remove the program too: close this window, then uninstall Statement Visualizer in Settings > Apps.")
+    else:
+        print(f"To remove the program too: close this window, then delete {os.path.basename(sys.executable)} and the "
+              f"_internal folder in {ROOT} (or that whole folder, if nothing else of yours is in it).")
     print("Reminder: if you used the Gmail download, also remove the app at https://myaccount.google.com/permissions")
     return 0
 
