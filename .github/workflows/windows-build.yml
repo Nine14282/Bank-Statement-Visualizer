@@ -65,8 +65,9 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           Compress-Archive -Path dist\StatementVisualizer -DestinationPath StatementVisualizer-windows.zip
-          # Inno Setup wants a plain version: the tag's (v1.2.3 -> 1.2.3), else 0.0.0 for a build of main.
-          $version = if ($env:REF -match '^refs/tags/v(\d+(\.\d+){0,3})$') { $Matches[1] } else { "0.0.0" }
+          # The tag's version (v1.2.3 -> 1.2.3, v1.0.0-beta -> 1.0.0-beta), else 0.0.0 for a build of main. Inno Setup
+          # shows it as text; the file's own version info stays 0.0.0.0.
+          $version = if ($env:REF -match '^refs/tags/v(\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?)$') { $Matches[1] } else { "0.0.0" }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" statement-visualizer.iss
           if ($LASTEXITCODE) { throw "ISCC failed ($LASTEXITCODE)" }
 
@@ -93,7 +94,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        # The artifact keeps the paths it was uploaded with: the Setup under dist/.
+        # The artifact keeps the paths it was uploaded with: the Setup under dist/. Not --prerelease, even for a -beta
+        # tag: releases/latest skips pre-releases, and the README's download link points there.
         run: |
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes \
             dist/StatementVisualizer-Setup.exe StatementVisualizer-windows.zip
