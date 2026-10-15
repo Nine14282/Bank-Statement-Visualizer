@@ -1,0 +1,38 @@
+# Run by `uv run pre-commit install` (once) and by CI (`pre-commit run --all-files`).
+# The ruff rev must equal the ruff pin in pyproject.toml; the uv rev must equal [tool.uv] required-version.
+exclude: ^web/prebuilt/   # generated single-file page
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: check-json
+        exclude: ^web/tsconfig\..*\.json$   # JSON with comments
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.26
+    hooks:
+      - id: uv-lock
+      # requirements.txt and requirements-app.txt are generated from uv.lock for end users (pip): keep in sync
+      - id: uv-export
+        name: uv-export requirements.txt
+        alias: uv-export-requirements
+        args: [--frozen, --no-dev, --no-emit-project, --quiet, --output-file=requirements.txt]
+      - id: uv-export
+        name: uv-export requirements-app.txt
+        alias: uv-export-requirements-app
+        args: [--frozen, --no-dev, --no-emit-project, --quiet, --extra=app, --output-file=requirements-app.txt]
