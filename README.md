@@ -1,5 +1,7 @@
 # Statement Visualizer
 
+[![CI](https://github.com/Nine14282/Bank-Statement-Visualizer/actions/workflows/ci.yml/badge.svg)](https://github.com/Nine14282/Bank-Statement-Visualizer/actions/workflows/ci.yml)
+
 Turns your **Krungthai (KTB) and Kasikorn (KBank) statement PDFs** into one merged ledger and an offline dashboard,
 shown in its own app window (or any browser): income vs expense, balance over time, categories, monthly spend rate,
 a searchable transaction table, and a warning if a statement month looks missing.
@@ -13,13 +15,13 @@ statement PDFs. See [Install](#install) and [Get started](#get-started).
 > Supports Krungthai's and KBank's Thai statement PDFs (the parsers read those layouts; the bank is
 > detected per file). Both accounts go into one ledger; each row shows which bank it came from, and
 > transfers between the two accounts are marked "Own transfer" and left out of income and spending.
-> Developed and tested on Linux. macOS support is written but **untested**. Windows works in **browser mode** as a standalone program (`StatementVisualizer.exe`, no Python needed), not yet tested on a real Windows PC; its app window comes later.
+> Developed and tested on Linux. macOS support is written but **untested**. Windows gets an installer for a standalone program (`StatementVisualizer.exe`, no Python needed) with its own app window, not yet tested on a real Windows PC.
 
 ## What you need
 
 | | |
 |---|---|
-| **OS** | **Linux** (tested). **macOS**: written for but untested, so expect rough edges (a fresh Mac's system Python is often 3.9, so install Python 3.10+ from Homebrew or python.org first). **Windows** 10/11: an installer (`StatementVisualizer-Setup.exe`) for a standalone program in browser mode, no Python needed (see [Windows](#windows)), not yet tested on a real Windows PC. |
+| **OS** | **Linux** (tested). **macOS**: written for but untested, so expect rough edges (a fresh Mac's system Python is often 3.9, so install Python 3.10+ from Homebrew or python.org first). **Windows** 10/11: an installer (`StatementVisualizer-Setup.exe`) for a standalone program with its own app window (WebView2), no Python needed (see [Windows](#windows)), not yet tested on a real Windows PC. |
 | **Python** | 3.10 or newer, with `venv`. Debian/Ubuntu: `sudo apt install python3 python3-venv`. |
 | **Internet** | for the first install (pip downloads a few packages and their dependencies) and for the optional Gmail download. Nothing else is ever sent anywhere. |
 | **App window** (Linux, optional) | Qt's web view (PyQt6), installed by pip into `.venv/`: a ~200 MB download, ~550 MB on disk. On an X11 desktop (not Wayland) also `sudo apt install libxcb-cursor0`. Without it everything works in your browser instead (or install with `./install.sh --web`, which skips the download). macOS needs nothing extra. |
@@ -350,28 +352,38 @@ with the same options.
 ### Windows
 
 Windows gets a **standalone program**: `StatementVisualizer.exe` with its `_internal` folder, built with PyInstaller,
-so no Python is needed. It runs in **browser mode**: the setup and add-statements pages and the dashboard open in your
-browser (the app window comes later). Not yet tested on a real Windows PC, so expect rough edges and please report
-them.
+so no Python is needed. It opens in **its own app window**, like on Linux, through Microsoft's WebView2 (Edge's engine:
+part of Windows 11; Setup installs it on the few Windows 10 PCs without it). Without WebView2 it falls back to the
+setup and add-statements pages in your browser. Not yet tested on a real Windows PC, so expect rough edges and please
+report them.
 
 1. Download **`StatementVisualizer-Setup.exe`** from the
    [latest release](https://github.com/Nine14282/Bank-Statement-Visualizer/releases/latest/download/StatementVisualizer-Setup.exe).
-2. Run it. Windows may warn about an unrecognised app the first time: the program isn't code-signed. Click **More
-   info**, then **Run anyway**. It installs for your account only (no admin) into
+2. Run it. Windows may warn about an unrecognised app: until releases are code-signed, and for a while after (Windows
+   trusts a new program as more people run it), it says *Windows protected your PC*. Click **More info**, then **Run
+   anyway**. To be sure the file is the one this project built, compare its checksum with the release's
+   `SHA256SUMS.txt`: `Get-FileHash StatementVisualizer-Setup.exe` in PowerShell. It installs for your account only (no
+   admin) into
    `%LOCALAPPDATA%\Programs\Statement Visualizer` and adds **Statement Visualizer** to the Start Menu (and a desktop icon
    if you tick it).
-3. At the end it opens the program: the first time, the setup page in your browser; later, the add-statements page.
-   Keep its console window open while you use the page.
+3. At the end it opens the app: the first time with the short setup (see [Get started](#get-started)), later with your
+   dashboard, **Add statements** and **Settings**. A console window shows for a moment while it starts, then hides.
+   From then on, open it from the Start Menu.
 
 Your statements, ledger and settings are saved in the program's folder (the same `Statement\`, `workspace\` and
 `.env` layout as above). **Updating:** run a newer `StatementVisualizer-Setup.exe`; it replaces the program and keeps
 your data. The first run after an update reads every PDF once more (its parse cache is per program version).
-**Removing:** Settings > Apps > Statement Visualizer removes the program but leaves your data in that folder; to delete
-the data too, run `.\StatementVisualizer.exe uninstall --all` there first.
+**Removing:** Settings > Apps > Statement Visualizer > Uninstall (or `.\StatementVisualizer.exe uninstall`, which
+starts the same uninstaller). If the app is open, it asks you to close it first. It removes the program, then asks
+whether to delete your data too (statement PDFs, ledger, saved passwords, Gmail login); **No** keeps them in that folder
+for a later install. It deletes only the program's own files, by name. Setup installs only into a new or empty folder
+(it refuses a drive root, your home, Desktop, Documents or Downloads, and any folder that holds other files), so nothing
+else is ever in there.
 
 The other commands, in a terminal (PowerShell or Command Prompt) in that folder: `.\StatementVisualizer.exe run
 --rebuild`, `.\StatementVisualizer.exe gmail` (`--listen`), `.\StatementVisualizer.exe clear`,
-`.\StatementVisualizer.exe uninstall`.
+`.\StatementVisualizer.exe uninstall`, and `.\StatementVisualizer.exe run --web` for the browser pages instead of the
+app window.
 
 **Without the installer** (portable): download `StatementVisualizer-windows.zip` from the same release and extract the
 `StatementVisualizer` folder into a folder of its own, e.g. `Documents\StatementVisualizer`; double-click
@@ -386,20 +398,44 @@ The dashboard is `Dashboard.html` in that folder; open it in your browser. If an
 `ledger.csv`, close the file in Excel (Windows won't replace a file another program has open). Real-time Gmail
 (`.\StatementVisualizer.exe gmail --listen`) has no service manager here: run it in a terminal you keep open.
 
-**Building it yourself** (on Windows, with Python 3.10+; PyInstaller only builds for the system it runs on). The
-packages are installed from `requirements-build.lock`, exact versions with their hashes:
+**Building it yourself** (on Windows, with [uv](https://docs.astral.sh/uv/); PyInstaller only builds for the system it
+runs on). The packages come from `uv.lock`, exact versions with their hashes. `UV_PROJECT_ENVIRONMENT` keeps the build in
+its own `build-venv` folder, not the app's `.venv`:
 
 ```bat
-py -m venv build-venv
-build-venv\Scripts\pip install --require-hashes -r requirements-build.lock
-build-venv\Scripts\pyinstaller --clean --noconfirm statement-visualizer.spec
+set UV_PROJECT_ENVIRONMENT=build-venv
+uv sync --locked --no-dev --group build
+uv run --no-sync pyinstaller --clean --noconfirm statement-visualizer.spec
 ```
 
 The program is `dist\StatementVisualizer\`; copy that whole folder where you want it (don't use it inside `dist\`: it
 would keep your data there). The installer as well, with [Inno Setup 6](https://jrsoftware.org/isinfo.php):
 `"%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" statement-visualizer.iss` writes `dist\StatementVisualizer-Setup.exe`.
-Maintainers: pushing a `v*` tag (e.g. `v1.0.0`) publishes both files on a GitHub release. From source without building, `py workspace\launcher.py run` (and `install`, `gmail`,
-...) also works.
+From source without building, `py workspace\launcher.py run` (and `install`, `gmail`, ...) also works.
+
+#### Releasing the Windows program (maintainers)
+
+Pushing a `v*` tag (e.g. `v1.0.0`, or `v1.0.0-beta.2`) builds, checks and publishes `StatementVisualizer-Setup.exe`,
+`StatementVisualizer-windows.zip` and their `SHA256SUMS.txt` on a GitHub release
+(`.github/workflows/windows-build.yml`). Every build also runs `StatementVisualizer.exe --smoke` (it imports every
+bundled script and the packages the build must hold, and prints `smoke ok`), and installs and uninstalls the Setup
+silently on GitHub's clean Windows machine. The tag's version goes into the program's and the Setup's file details (Properties > Details), which
+antivirus heuristics look at.
+
+- **Code signing** (optional, free for open source): apply to the [SignPath Foundation](https://signpath.org/). Once
+  accepted, create a project with the artifact configurations in `.signpath/artifact-configurations/` (slugs `program`
+  and `setup`) and a `release-signing` policy, link it to GitHub as its trusted build system, then add to this repository
+  the variables `SIGNPATH_ORGANIZATION_ID` and `SIGNPATH_PROJECT_SLUG` and the secret `SIGNPATH_API_TOKEN`. From then on
+  a tag's build has the `.exe` signed before the Setup is made from it, then the Setup; each waits for the approval in
+  SignPath. The publisher then shows as SignPath Foundation. The uninstaller stays unsigned (made on the user's PC).
+- **VirusTotal** (optional): add a free VirusTotal API key as the secret `VT_API_KEY`; each release's files are then
+  scanned and the scan links added to its notes.
+- **A false positive** (an antivirus calls the program malware): report the file to the vendor, for Microsoft Defender
+  at [Microsoft's submission page](https://www.microsoft.com/wdsi/filesubmission) as a software developer, "incorrectly
+  detected". Signing makes these rarer.
+- **Testing on a clean Windows**: [Windows Sandbox](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file)
+  (Windows 10/11 Pro) is a fresh Windows each time. Put `StatementVisualizer-Setup.exe` (and test PDFs) in
+  `%USERPROFILE%\StatementVisualizer-test`, then double-click `windows-sandbox.wsb`: Setup starts inside it.
 
 ## Where things are
 
@@ -410,7 +446,7 @@ workspace/expected.json     expected spending from the setup page (git-ignored)
 workspace/manual_entries.csv  hand-typed spends + Gmail payment notices (git-ignored)
 workspace/token.json        cached Gmail login   (git-ignored, secret)
 workspace/.cache/           statements already read, so updates only read new ones (git-ignored, private)
-workspace/.app/             the app window's saved labels, theme and expected spending (Linux; git-ignored),
+workspace/.app/             the app window's saved labels, theme and expected spending (Linux, Windows; git-ignored),
                             its size (window.json), and the real-time Gmail log gmail-listen.log
 .env                        your settings        (git-ignored, secret)
 .venv/                      the Python environment ./install.sh makes (git-ignored)
@@ -465,31 +501,62 @@ commit the code. The dashboard file contains your transactions: share it only on
 
 ## Adding a bank
 
-Reading statements: one module per bank in `workspace/banks/` (`ktb.py`, `kbank.py`): its parser, a
-self-check, and a `BANK = Bank(...)` record (id, name, password setting, file-name pattern, text that
-identifies its PDFs). Copy the closest one, then add it to `BANKS` in `workspace/banks/__init__.py`. The
+Reading statements: one module per bank in `workspace/banks/` (`ktb.py`, `kbank.py`): its parser and a
+`BANK = Bank(...)` record (id, name, password setting, file-name pattern, text that
+identifies its PDFs). Copy the closest one, then add it to `BANKS` in `workspace/banks/__init__.py`, and its tests as
+`tests/test_<bank>.py` (copy `tests/test_ktb.py`). The
 setup page, password lookup and build all read that list. Showing it: one entry in `web/src/lib/banks.ts` (name, card colour, logo).
 Themes work the same way: one entry in `web/src/lib/themes.ts`, plus a `[data-theme="…"]` block in
 `web/src/index.css` for colours beyond the light/dark base.
 
+## Developing
+
+The app and its end-user install stay plain `pip` (`./install.sh`, `requirements.txt`). Developers use the standard tools,
+all configured in `pyproject.toml`: [uv](https://docs.astral.sh/uv/) (dependencies and `uv.lock`), ruff (lint and
+format), pytest and pre-commit. The pinned uv version is in `[tool.uv] required-version`.
+
+```bash
+uv sync --extra app          # dev tools and the app's packages into .venv
+uv run pytest                # the Python tests in tests/ (they use a temporary data folder, never your own data)
+uv run ruff check            # lint (add --fix to apply fixes)
+uv run ruff format workspace tests   # format (--check only reports)
+uv run pre-commit install    # once: runs ruff, file checks and the lock/export checks before each commit
+uv run pre-commit run --all-files    # the same checks on every file, as CI does
+```
+
+Use `--extra app` (or point `UV_PROJECT_ENVIRONMENT` at another folder): a plain `uv sync` would remove the app window's
+packages (PyQt6, pywebview) from `.venv`, and the app would open in the browser until you run `./install.sh` again.
+
+`requirements.txt` and `requirements-app.txt` are **generated** from `uv.lock`, because end users install with pip. After
+changing the dependencies in `pyproject.toml`, run `uv lock`, then:
+
+```bash
+uv export --frozen --no-dev --no-emit-project --quiet --output-file=requirements.txt
+uv export --frozen --no-dev --no-emit-project --quiet --extra=app --output-file=requirements-app.txt
+```
+
+(The pre-commit hooks do the same; a lock change then shows up as a file the hook modified.) Keep the ruff version in
+`pyproject.toml` equal to the `ruff-pre-commit` rev in `.pre-commit-config.yaml`, and bump them together.
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every pull request: pre-commit
+(lint, format, lock and exports in sync), `pytest` on Ubuntu and Windows with Python 3.10 and 3.12, and for `web/` the
+lint, Vitest, the build, and a check that the committed `web/prebuilt/index.html` is what the build makes.
+
+Reformatting `extract_ledger.py` or `banks/*.py` changes the PDF parse-cache key, so the next update reads every PDF
+once more. To keep `git blame` useful after a reformat commit, list its hash in `.git-blame-ignore-revs` and run
+`git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+
 ## Changing the dashboard (developers)
 
-Only needed if you edit `web/src/`. Needs Node.js 22.12+ (or 20.19+).
+Only needed if you edit `web/src/`. Needs Node.js 22.12+ (Vitest 5's floor; the build alone also works on 20.19+).
 
 ```bash
 cd web && npm install
 npm run dev      # live preview with your own data (from the last ./run.sh)
 npm run build    # rebuilds web/prebuilt/index.html: the page without data that everyone's build uses
+npm test         # Vitest (src/lib/ledger.test.ts, the ledger maths); `npx vitest run` runs once
+npm run lint     # oxlint: 3 known warnings in generated components/ui files
 ```
 
-Commit `web/prebuilt/index.html` with your source change, or users keep the old page. The build never
-contains data (the ledger is written into the page by `workspace/build_dashboard.py`), so it is safe to commit.
-
-There is no test suite; the Python scripts carry quick self-checks (each prints `selfcheck ok`, or `txid self-check passed` for `txid.py`), and the web app has a
-linter (3 known warnings in generated `components/ui` files):
-
-```bash
-for f in extract_ledger update_statement build_dashboard welcome fetch_gmail; do .venv/bin/python workspace/$f.py --selfcheck; done
-.venv/bin/python workspace/txid.py
-cd web && npm run lint
-```
+Commit `web/prebuilt/index.html` with your source change, or users keep the old page (CI fails if it is stale). The build
+never contains data (the ledger is written into the page by `workspace/build_dashboard.py`), so it is safe to commit.
