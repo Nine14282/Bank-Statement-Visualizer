@@ -1,0 +1,21 @@
+<!-- Try StatementVisualizer-Setup.exe on a clean Windows: Windows Sandbox (Windows 10/11 Pro or Enterprise, turned on
+     in "Turn Windows features on or off") starts a fresh copy of Windows, and closing it throws everything away.
+     1. Make the folder %USERPROFILE%\StatementVisualizer-test (Windows won't start the sandbox without it) and put
+        StatementVisualizer-Setup.exe there, plus any statement PDFs to try.
+     2. Double-click this file. Setup starts by itself inside the sandbox; go through it as a new user would.
+     The folder is shared read-only, so nothing in the sandbox can change it. Environment variables in HostFolder
+     need Windows 11 23H2 or newer; on older Windows, write the folder's full path there instead. Networking stays on:
+     WebView2's installer and the Gmail download need it. README, "Testing on a clean Windows". -->
+<Configuration>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>%USERPROFILE%\StatementVisualizer-test</HostFolder>
+      <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\StatementVisualizer-test</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>C:\Users\WDAGUtilityAccount\Desktop\StatementVisualizer-test\StatementVisualizer-Setup.exe</Command>
+  </LogonCommand>
+  <MemoryInMB>4096</MemoryInMB>
+</Configuration>
