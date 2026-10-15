@@ -6,7 +6,7 @@ import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import Snackbar from '@mui/material/Snackbar'
 import Typography from '@mui/material/Typography'
-import { LATE_NOTE, RULES, TX, bankName, baht, lateNight, merchant, onData, ruleFor, saveRules, signed, type Rule, type Tx } from '@/lib/ledger'
+import { LATE_NOTE, RULES, TX, bankName, baht, lateNight, merchant, onData, ruleFor, rowsFor, saveRules, signed, type Rule, type Tx } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -29,8 +29,9 @@ export function LabelForm({ tx, rule = ruleFor(tx.desc) }: { tx: Tx; rule?: Rule
   const m = match.trim().toLowerCase()
   const others = RULES.filter((r) => r !== rule)
   const rows = m ? TX.filter((t) => t.desc.toLowerCase().includes(m)) : []
-  // rows a longer (more specific) label would keep, since the most specific label wins
-  const taken = rows.filter((t) => others.some((r) => r.match.length > m.length && t.desc.toLowerCase().includes(r.match.toLowerCase()))).length
+  // rows a narrower label (its text in fewer rows) would keep, since the narrowest label wins (ledger.ts ruleFor)
+  const narrower = others.filter((r) => r.match && rowsFor(r).length < rows.length)
+  const taken = rows.filter((t) => narrower.some((r) => t.desc.toLowerCase().includes(r.match.toLowerCase()))).length
   const hits = rows.length - taken
   const field = 'w-full rounded-xl border bg-transparent px-3 py-2 text-sm outline-none transition-shadow focus:ring-2 focus:ring-ring/40'
   return (

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { FIRST, LAST, TX, addDays, balanceNow, bankName, baht, daysBetween, onData, rateRow, useLedger } from '@/lib/ledger'
+import { FIRST, LAST, TX, addDays, balanceNow, bankName, baht, daysBetween, onData, rateRow, runway, useLedger } from '@/lib/ledger'
 import { InfoTip } from '@/components/ledger/info'
 import { cn } from '@/lib/utils'
 
@@ -41,9 +41,8 @@ export function Predict() {
   const t = rateRow(start > FIRST ? start : FIRST, today, cash)
   const rate = (net ? t.spend - t.inc : t.spend) / t.days  // ฿/day leaving the account
   const stale = daysBetween(LAST, today)  // days since the newest record
-  // Money is as of LAST; the date it runs out is LAST + balance/rate, and "lasts" counts from today.
-  const left = (r: number) => (now.bal <= 0 ? 0 : r > 0 ? Math.max(0, Math.floor(now.bal / r) - stale) : null)  // null = never runs out
-  const until = (r: number) => (now.bal <= 0 ? LAST : r > 0 ? addDays(LAST, Math.floor(now.bal / r)) : '—')
+  const left = (r: number) => runway(now.bal, r, stale, LAST).days   // null = never runs out
+  const until = (r: number) => runway(now.bal, r, stale, LAST).until
   const main = left(rate)
 
   return (

@@ -22,17 +22,20 @@ export let TX = DATA.tx
 export type Rule = { match: string; label: string; cat?: string }
 const RULES_KEY = 'ledger-label-rules'
 export const RULES: Rule[] = (() => { try { return JSON.parse(localStorage.getItem(RULES_KEY) ?? '[]') } catch { return [] } })()
-// When several labels match one description the most specific wins (longest match text; newest on a tie), so a
-// narrow label ("คนละครึ่ง" for one wallet) is not hidden by a broad one ("True Money" for every wallet).
+// When several labels match one description the narrowest wins: the one whose text appears in the fewest rows (newest
+// on a tie), so a label for one wallet ("คนละครึ่ง") is not hidden by one for every wallet ("True Money"). Not the
+// longest text: there the Thai name is the shorter one.
+let reach = new Map<Rule, number>()   // rows each rule's text appears in, per dataset (applyRules)
 export const ruleFor = (desc: string) => {
   const d = desc.toLowerCase()
   let best: Rule | undefined
-  for (const r of RULES) if (r.match && d.includes(r.match.toLowerCase()) && (!best || r.match.length >= best.match.length)) best = r
+  for (const r of RULES) if (r.match && d.includes(r.match.toLowerCase()) && (!best || reach.get(r)! <= reach.get(best)!)) best = r
   return best
 }
 // Rows a rule's text appears in, whether or not it is the one that wins there.
 export const rowsFor = (r: Rule) => TX.filter((t) => t.desc.toLowerCase().includes(r.match.toLowerCase()))
 const applyRules = () => {  // applied once per dataset, so every total, chart and search sees it
+  reach = new Map(RULES.map((r) => [r, rowsFor(r).length]))
   for (const t of TX) {
     const r = ruleFor(t.desc)
     if (r) { t.label = r.label; if (r.cat) t.cat = r.cat }
@@ -203,7 +206,7 @@ export function rateRow(a: string, b: string, cash: boolean): RateRow {
 export function rateTable(from: string, to: string, cash: boolean) {
   const end = to < LAST ? to : LAST  // never count days after the last record as zero spending
   // "Usual" = median ฿/day of the calendar months before the range
-  const before = new Set(TX.filter((t) => t.date < from).map((t) => t.date.slice(0, 7)))
+  const before = new Set(TX.filter((t) => t.date < from.slice(0, 8) + '01').map((t) => t.date.slice(0, 7)))  // not From's own month
   const prior = [...before].map((k) => rateRow(k + '-01' > FIRST ? k + '-01' : FIRST, mEnd(k), cash).rate)
   const months: (RateRow & { k: string; partial: boolean })[] = []
   for (let k = from.slice(0, 7); k <= end.slice(0, 7);) {
@@ -218,6 +221,13 @@ export function rateTable(from: string, to: string, cash: boolean) {
   const usual = median(own ? months.map((m) => m.rate) : prior)
   return { months, total: rateRow(from, end, cash), usual, nPrior: own ? months.length : prior.length, own, clipped: to > LAST }
 }
+
+// "How long will my money last" (Predict): money as of LAST at `rate` ฿/day runs out on LAST + bal/rate; the days
+// left count from today, `stale` days after LAST. A rate of 0 or less never runs out (days null, until '—').
+export const runway = (bal: number, rate: number, stale: number, last: string) => ({
+  days: bal <= 0 ? 0 : rate > 0 ? Math.max(0, Math.floor(bal / rate) - stale) : null,
+  until: bal <= 0 ? last : rate > 0 ? addDays(last, Math.floor(bal / rate)) : '—',
+})
 
 export const pctOf = (o: number, i: number) => (i > 0 ? ((o / i) * 100).toFixed(0) + '%' : '—')
 export const idx = (r: number, usual: number | null) => (usual ? r / usual : null)
@@ -257,12 +267,15 @@ export function payees(rows: Tx[], n: number, inc = false, own = false) {
 }
 
 // Spending in the month of the last record so far; `keys` = payees on the expected-spending list, whose share is
-// reported apart (the rest is unplanned).
+// reported apart (the rest is unplanned). Planned counts only what `spent` counts (no cash, lending or stocks), so
+// it is always a part of it.
 export function thisMonth(keys: Set<string>) {
   const from = LAST.slice(0, 8) + '01', end = mEnd(LAST.slice(0, 7))
   const days = +end.slice(8)
   let planned = 0
-  for (const t of TX) if (t.amt < 0 && t.cat !== OWN && t.date.slice(0, 10) >= from && keys.has(payeeKey(t))) planned -= t.amt
+  for (const t of TX) {
+    if (t.amt < 0 && t.cat !== OWN && !NOT_SPEND.has(t.cat) && t.date.slice(0, 10) >= from && keys.has(payeeKey(t))) planned -= t.amt
+  }
   return { from, end, days, spent: rateRow(from, LAST, false).spend, planned: round2(planned), elapsed: +LAST.slice(8) / days }
 }
 
