@@ -14,6 +14,7 @@ The password comes from --password=, else the password setting of the bank the f
 (banks/: KBANK_PW for STM_* files, KTB_PW for others; see .env.example), else it is asked for
 (typed, hidden).
 """
+
 import csv
 import getpass
 import os
@@ -27,7 +28,7 @@ import config  # loads the project's env settings into os.environ
 from banks import BANKS, Bank
 from txid import stamp_ids
 
-HEADER = ["Date", "Description", "Category", "Amount", "Balance", "ID", "Bank"]   # ID: see txid.py
+HEADER = ["Date", "Description", "Category", "Amount", "Balance", "ID", "Bank"]  # ID: see txid.py
 
 BY_ID = {b.id: b for b in BANKS}
 
@@ -70,25 +71,15 @@ def write_csv(rows, dst):
         w.writerows(rows)
     try:
         os.replace(tmp, dst)
-    except PermissionError:   # Windows won't replace a file another program has open
+    except PermissionError:  # Windows won't replace a file another program has open
         os.remove(tmp)
         sys.exit(f"Can't update {dst}: close it in the program that has it open (Excel?), then try again.")
 
 
-def selfcheck():
-    """python extract_ledger.py --selfcheck: every bank's own check."""
-    for b in BANKS:
-        b.selfcheck()
-    print("selfcheck ok")
-
-
 def main() -> int:
-    if sys.argv[1:] == ["--selfcheck"]:
-        selfcheck()
-        return 0
     args = [a for a in sys.argv[1:] if not a.startswith("--password=")]
     if len(args) != 2:
-        print("Usage: extract_ledger.py IN.pdf OUT.csv [--password=...]   (or --selfcheck)", file=sys.stderr)
+        print("Usage: extract_ledger.py IN.pdf OUT.csv [--password=...]", file=sys.stderr)
         return 2
     src, dst = args
 
@@ -97,13 +88,15 @@ def main() -> int:
     pw = typed[0] if typed else password_for(src)
     try:
         bank = bank_of(src, pw)
-    except PdfminerException:   # wrong or missing password (pdfplumber wraps every open failure in this): ask, if someone can
+    except (
+        PdfminerException
+    ):  # wrong or missing password (pdfplumber wraps every open failure in this): ask, if someone can
         if not sys.stdin.isatty():
             raise
         named = bank_from_name(src)
         pw = getpass.getpass(f"{named.name if named else 'PDF'} password for {os.path.basename(src)}: ")
         bank = bank_of(src, pw)
-    rows = bank.parse(src, pw)     # prints a CHECK line for anything that doesn't reconcile
+    rows = bank.parse(src, pw)  # prints a CHECK line for anything that doesn't reconcile
     stamp_ids(rows)
     write_csv(rows, dst)
     print(f"Wrote {len(rows)} {bank.name} transactions to {dst}")

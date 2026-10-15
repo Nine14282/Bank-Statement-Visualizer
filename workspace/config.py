@@ -10,19 +10,21 @@ Where things live. From source: everything in the project folder. In the PyInsta
 your data next to the .exe (ROOT, the same layout: Statement/, workspace/, web/dist/, .env), and the program's own
 files inside the bundle (APP: web/prebuilt/index.html, .env.example), read-only.
 """
+
 import os
 import sys
 
-os.umask(0o077)   # ledger, dashboard and cache are private even when a script is run by hand
+os.umask(0o077)  # ledger, dashboard and cache are private even when a script is run by hand
 
 FROZEN = bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
-HERE = os.path.dirname(os.path.abspath(__file__))   # the scripts (from source)
-ROOT = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(HERE)   # your data
-WORK = os.path.join(ROOT, "workspace")              # ledger, caches, Gmail login
-APP = sys._MEIPASS if FROZEN else ROOT              # shipped files
+HERE = os.path.dirname(os.path.abspath(__file__))  # the scripts (from source)
+# your data; SV_ROOT redirects it (the tests point it at a temp folder so they never touch the real data)
+ROOT = os.environ.get("SV_ROOT") or (os.path.dirname(sys.executable) if FROZEN else os.path.dirname(HERE))
+WORK = os.path.join(ROOT, "workspace")  # ledger, caches, Gmail login
+APP = sys._MEIPASS if FROZEN else os.path.dirname(HERE)  # shipped files
 ENVFILE = os.path.join(ROOT, ".env")
 # The scripts the build can run as its own subprocesses (launcher.py's --script); nothing else is accepted.
-SCRIPTS = ("app", "build_dashboard", "extract_ledger", "fetch_gmail", "txid", "update_statement", "welcome")
+SCRIPTS = ("app", "build_dashboard", "extract_ledger", "fetch_gmail", "update_statement", "welcome")
 
 if FROZEN and sys.platform.startswith("linux"):
     # The bootloader points LD_LIBRARY_PATH at the bundle; a system program started from here (xdg-open, the browser)
@@ -47,7 +49,7 @@ def script(name: str, *args: str) -> list[str]:
 def command(name: str) -> str:
     """How to type one of the project's commands (run, gmail, ...): the .exe in the build, else ./run.sh (from source on
     Windows: the launcher itself)."""
-    if FROZEN:   # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
+    if FROZEN:  # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
         return f"{'.' + os.sep if os.name == 'nt' else './'}{os.path.basename(sys.executable)} {name}"
     return rf"py workspace\launcher.py {name}" if os.name == "nt" else f"./{name}.sh"
 
@@ -61,8 +63,8 @@ def load_env() -> None:
             continue
         key, sep, value = line.removeprefix("export ").partition("=")
         value = value.strip()
-        if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":   # one matching pair, so a quoted
-            value = value[1:-1]                                              # value keeps its inner quotes
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":  # one matching pair, so a quoted
+            value = value[1:-1]  # value keeps its inner quotes
         if sep and value:
             os.environ.setdefault(key.strip(), value)
 
@@ -77,6 +79,7 @@ def lock(f, wait: bool = True) -> bool:
     if os.name == "nt":
         import msvcrt
         import time
+
         f.seek(0)
         while True:
             try:
@@ -87,6 +90,7 @@ def lock(f, wait: bool = True) -> bool:
                     return False
                 time.sleep(0.5)
     import fcntl
+
     try:
         fcntl.flock(f, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         return True

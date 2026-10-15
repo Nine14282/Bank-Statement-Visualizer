@@ -1,10 +1,11 @@
-"""Bank registry: one module per bank (its parser, layout constants, type labels, self-check and a
+"""Bank registry: one module per bank (its parser, layout constants, type labels and a
 BANK = Bank(...) record), listed in BANKS below. Every other script, the setup wizard and the password
 lookup read BANKS. Order matters: the first bank whose name pattern / page-1 text matches wins, and the
 last entry is the fallback for a statement nothing else claims.
 
 Adding a bank: copy the closest module (ktb.py or kbank.py), adapt it, add its BANK here, and a display
 entry in web/src/lib/banks.ts."""
+
 from . import kbank, ktb
 from .common import Bank
 

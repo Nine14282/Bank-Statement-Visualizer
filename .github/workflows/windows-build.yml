@@ -1,9 +1,15 @@
 # The Windows program: builds dist/StatementVisualizer/ with PyInstaller (statement-visualizer.spec), runs the
-# self-checks and a fresh install with the built .exe, wraps it in StatementVisualizer-Setup.exe (Inno Setup,
-# statement-visualizer.iss, preinstalled on GitHub's Windows images) and uploads that and StatementVisualizer-windows.zip
-# as an artifact named after the commit. A pushed v* tag (e.g. v1.0.0) also publishes both on a GitHub release, so the
-# download link stays the same: releases/latest/download/StatementVisualizer-Setup.exe. PyInstaller doesn't cross-compile, so the .exe is built here, on Windows. Actions are pinned
-# to commit SHAs; the Python packages come from requirements-build.lock, hash-checked.
+# smoke check and a fresh install with the built .exe, wraps it in StatementVisualizer-Setup.exe (Inno Setup,
+# statement-visualizer.iss, preinstalled on GitHub's Windows images), installs and uninstalls that Setup silently, and
+# uploads it and StatementVisualizer-windows.zip as an artifact named after the commit. A pushed v* tag (e.g. v1.0.0)
+# also publishes both on a GitHub release with their SHA-256 sums, so the download link stays the same:
+# releases/latest/download/StatementVisualizer-Setup.exe. PyInstaller doesn't cross-compile, so the .exe is built here,
+# on Windows. Actions are pinned to commit SHAs; the Python packages come from uv.lock (uv sync --locked).
+#
+# Optional, off until set up (README, "Releasing the Windows program"):
+#   SignPath code signing of a tag's .exe and Setup: repository variables SIGNPATH_ORGANIZATION_ID and
+#     SIGNPATH_PROJECT_SLUG, secret SIGNPATH_API_TOKEN; artifact configurations in .signpath/.
+#   VirusTotal scan of a release's files, links added to its notes: secret VT_API_KEY.
 name: Windows build
 
 on:
@@ -11,8 +17,8 @@ on:
   push:
     branches: [main]
     tags: ["v*"]   # path filters don't apply to tag pushes
-    paths: ["workspace/**", "web/prebuilt/**", "statement-visualizer.spec", "requirements*", ".env.example",
-            ".github/workflows/windows-build.yml"]
+    paths: ["workspace/**", "web/prebuilt/**", "statement-visualizer.spec", "statement-visualizer.iss", "requirements*",
+            "pyproject.toml", "uv.lock", ".env.example", ".signpath/**", ".github/workflows/windows-build.yml"]
 
 permissions:
   contents: read
@@ -20,7 +26,14 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60   # a signed release waits for SignPath (its approval included)
+    permissions:
+      contents: read
+      actions: read       # SignPath fetches the uploaded artifacts it signs
+    env:
+      UV_PYTHON: "3.12"   # the setup-python one, so uv doesn't fetch another
+      # Signing runs for a release (v* tag) once SignPath is set up; never for pushes to main.
+      SIGN: ${{ startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -28,6 +41,20 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          version: "0.11.26"
+
+      - name: Version
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          # The tag's version (v1.2.3 -> 1.2.3, v1.0.0-beta -> 1.0.0-beta), else 0.0.0 for a build of main. SV_VERSION is
+          # the text shown (Setup, Settings > Apps, the .exe's details); SV_FILE_VERSION its numbers only, which is all
+          # a Windows file version can hold. The spec and the Inno script read both.
+          if ($env:REF -match '^refs/tags/v((\d+(\.\d+){0,3})(-[0-9A-Za-z.]+)?)$') { $v, $n = $Matches[1], $Matches[2] }
+          else { $v, $n = "0.0.0", "0.0.0" }
+          Add-Content -Path $env:GITHUB_ENV -Value "SV_VERSION=$v", "SV_FILE_VERSION=$n"
 
       - name: Build
         run: |
@@ -36,23 +63,60 @@ jobs:
                     -Pattern '<script id="ledger-data" type="application/json">null</script>')) {
             throw "web/prebuilt/index.html lost its empty ledger-data placeholder"
           }
-          python -m pip install --require-hashes -r requirements-build.lock
-          if ($LASTEXITCODE) { throw "pip install failed ($LASTEXITCODE)" }
-          pyinstaller --clean --noconfirm statement-visualizer.spec
+          uv sync --locked --no-dev --group build
+          if ($LASTEXITCODE) { throw "uv sync failed ($LASTEXITCODE)" }
+          uv run --no-sync pyinstaller --clean --noconfirm statement-visualizer.spec
           if ($LASTEXITCODE) { throw "pyinstaller failed ($LASTEXITCODE)" }
+          # The app window's parts (pywebview's JS, WebView2 DLLs and loader, pythonnet's runtime): a missing one only
+          # shows on a real PC as no window, and the program falling back to the browser.
+          $internal = "dist\StatementVisualizer\_internal"
+          foreach ($f in @("webview\js\api.js", "webview\lib\Microsoft.Web.WebView2.Core.dll",
+                           "webview\lib\Microsoft.Web.WebView2.WinForms.dll",
+                           "webview\lib\runtimes\win-x64\native\WebView2Loader.dll")) {
+            if (-not (Test-Path (Join-Path $internal $f))) { throw "the build has no $f" }
+          }
+          if (-not (Get-ChildItem -Recurse -Path $internal -Filter Python.Runtime.dll)) { throw "the build has no Python.Runtime.dll" }
+          $info = (Get-Item dist\StatementVisualizer\StatementVisualizer.exe).VersionInfo
+          if ($info.ProductVersion -ne $env:SV_VERSION) { throw "the .exe's version info says '$($info.ProductVersion)'" }
 
-      - name: Self-checks and a fresh install, with the built program
+      # Signed before Setup is made from it, so the installed program is signed too (.signpath/, "program").
+      - name: Upload the program for signing
+        id: unsigned-program
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: unsigned-program-${{ github.sha }}
+          path: dist/StatementVisualizer/StatementVisualizer.exe
+          if-no-files-found: error
+      - name: Sign the program
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092  # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: program
+          github-artifact-id: ${{ steps.unsigned-program.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-program
+      - name: Use the signed program
+        if: env.SIGN == 'true'
+        run: |
+          Copy-Item -Force signed-program\StatementVisualizer.exe dist\StatementVisualizer\StatementVisualizer.exe
+          $sig = Get-AuthenticodeSignature dist\StatementVisualizer\StatementVisualizer.exe
+          if ($sig.Status -ne "Valid") { throw "the signed program's signature: $($sig.Status)" }
+
+      - name: Smoke check and a fresh install, with the built program
         run: |
           # A copy elsewhere, as a user would unpack it: its data folders start empty.
           $app = Join-Path $env:RUNNER_TEMP "StatementVisualizer"
           Copy-Item -Recurse dist\StatementVisualizer $app
           $exe = Join-Path $app "StatementVisualizer.exe"
-          foreach ($check in @("txid", "extract_ledger --selfcheck", "build_dashboard --selfcheck",
-                               "update_statement --selfcheck", "welcome --selfcheck", "fetch_gmail --selfcheck")) {
-            Write-Output "== $check"
-            & $exe --script @($check -split " ")
-            if ($LASTEXITCODE) { throw "$check failed ($LASTEXITCODE)" }
-          }
+          # --smoke imports every workspace script and the packages the build must hold (pdfplumber, Google sign-in,
+          # pywebview): a missing one fails here, not on a user's PC. The Python tests run in ci.yml (uv run pytest).
+          & $exe --smoke
+          if ($LASTEXITCODE) { throw "smoke check failed ($LASTEXITCODE)" }
           & $exe install
           if ($LASTEXITCODE) { throw "install failed ($LASTEXITCODE)" }
           if (-not (Test-Path (Join-Path $app "web\dist\index.html"))) { throw "install built no dashboard" }
@@ -61,15 +125,78 @@ jobs:
           exit 0
 
       - name: Package
-        env:
-          REF: ${{ github.ref }}
         run: |
           Compress-Archive -Path dist\StatementVisualizer -DestinationPath StatementVisualizer-windows.zip
-          # The tag's version (v1.2.3 -> 1.2.3, v1.0.0-beta -> 1.0.0-beta), else 0.0.0 for a build of main. Inno Setup
-          # shows it as text; the file's own version info stays 0.0.0.0.
-          $version = if ($env:REF -match '^refs/tags/v(\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?)$') { $Matches[1] } else { "0.0.0" }
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" statement-visualizer.iss
+          # Microsoft's WebView2 bootstrapper, for the few PCs without the runtime (statement-visualizer.iss). Its
+          # content changes with each runtime release, so it is checked by Microsoft's signature, not a fixed hash.
+          $boot = "dist\MicrosoftEdgeWebview2Setup.exe"
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $boot
+          $sig = Get-AuthenticodeSignature $boot
+          if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+            throw "WebView2 bootstrapper signature: $($sig.Status) $($sig.SignerCertificate.Subject)"
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:SV_VERSION" `
+            "/DFileVersion=$env:SV_FILE_VERSION" statement-visualizer.iss
           if ($LASTEXITCODE) { throw "ISCC failed ($LASTEXITCODE)" }
+
+      - name: Upload Setup for signing
+        id: unsigned-setup
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: unsigned-setup-${{ github.sha }}
+          path: dist/StatementVisualizer-Setup.exe
+          if-no-files-found: error
+      - name: Sign Setup
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092  # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: setup
+          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-setup
+      - name: Use the signed Setup
+        if: env.SIGN == 'true'
+        run: |
+          Copy-Item -Force signed-setup\StatementVisualizer-Setup.exe dist\StatementVisualizer-Setup.exe
+          $sig = Get-AuthenticodeSignature dist\StatementVisualizer-Setup.exe
+          if ($sig.Status -ne "Valid") { throw "the signed Setup's signature: $($sig.Status)" }
+
+      - name: Install and uninstall with Setup, silently
+        run: |
+          # As a user would, on this fresh machine: Setup installs for this account, the program sets itself up there,
+          # and the uninstaller takes the program away but leaves the data it made.
+          $log = Join-Path $env:RUNNER_TEMP "setup.log"
+          # Never into a folder of someone else's files (the folder check in the .iss; Inno runs it on silent installs
+          # too). Before the real install: once installed, Setup skips the folder page and with it the check.
+          $other = Join-Path $env:RUNNER_TEMP "other"
+          New-Item -ItemType Directory -Force $other | Out-Null
+          Set-Content (Join-Path $other "keep.txt") "not Setup's"
+          Start-Process -Wait (Resolve-Path dist\StatementVisualizer-Setup.exe) `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$other`""
+          if ((Test-Path (Join-Path $other "StatementVisualizer.exe")) -or -not (Test-Path (Join-Path $other "keep.txt"))) {
+            throw "Setup installed into a folder that holds other files"
+          }
+          $p = Start-Process -Wait -PassThru (Resolve-Path dist\StatementVisualizer-Setup.exe) `
+                 -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`""
+          if ($p.ExitCode) { Get-Content $log; throw "Setup failed ($($p.ExitCode))" }
+          $dir = Join-Path $env:LOCALAPPDATA "Programs\Statement Visualizer"
+          $exe = Join-Path $dir "StatementVisualizer.exe"
+          foreach ($f in @($exe, (Join-Path $dir "unins000.exe"))) { if (-not (Test-Path $f)) { throw "Setup didn't install $f" } }
+          & $exe install
+          if ($LASTEXITCODE) { throw "install in the installed copy failed ($LASTEXITCODE)" }
+          # Some data to keep: a silent uninstall answers its "delete your data too?" with the default, No.
+          $data = @((Join-Path $dir "Statement\keep.pdf"), (Join-Path $dir "workspace\ledger.csv"))
+          foreach ($f in $data) { Set-Content $f "x" }
+          $p = Start-Process -Wait -PassThru (Join-Path $dir "unins000.exe") `
+                 -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if ($p.ExitCode) { throw "uninstall failed ($($p.ExitCode))" }
+          if (Test-Path $exe) { throw "uninstall left the program behind" }
+          foreach ($f in $data + @(Join-Path $dir ".env")) { if (-not (Test-Path $f)) { throw "uninstall removed the user's data: $f" } }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
@@ -86,6 +213,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -95,7 +224,33 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         # The artifact keeps the paths it was uploaded with: the Setup under dist/. Not --prerelease, even for a -beta
-        # tag: releases/latest skips pre-releases, and the README's download link points there.
+        # tag: releases/latest skips pre-releases, and the README's download link points there. SHA256SUMS.txt lets
+        # anyone check a download (README).
         run: |
+          mv dist/StatementVisualizer-Setup.exe .
+          sha256sum StatementVisualizer-Setup.exe StatementVisualizer-windows.zip > SHA256SUMS.txt
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes \
-            dist/StatementVisualizer-Setup.exe StatementVisualizer-windows.zip
+            StatementVisualizer-Setup.exe StatementVisualizer-windows.zip SHA256SUMS.txt
+
+      # A second opinion from ~70 antivirus engines before people download it; a false positive shows here first
+      # (README, "Releasing the Windows program"). The free API allows 4 requests a minute.
+      - name: Scan with VirusTotal
+        id: virustotal
+        if: env.VT_API_KEY != ''
+        uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2  # v5.0.0
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          request_rate: 4
+          files: |
+            StatementVisualizer-Setup.exe
+            StatementVisualizer-windows.zip
+      - name: Add the scan links to the release notes
+        if: env.VT_API_KEY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          ANALYSIS: ${{ steps.virustotal.outputs.analysis }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          { echo; echo "**VirusTotal scans**"; echo "$ANALYSIS" | tr ',' '\n' | sed 's/^\([^=]*\)=\(.*\)$/- [\1](\2)/'; } >> notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md

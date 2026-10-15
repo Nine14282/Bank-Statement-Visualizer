@@ -22,6 +22,7 @@ Usage:
     KTB_PW=xxxx KBANK_PW=yyyy python update_statement.py
 Defaults: Statement/ -> ledger.csv -> web/dist/index.html
 """
+
 import contextlib
 import csv
 import functools
@@ -44,8 +45,8 @@ from extract_ledger import BANKS, BY_ID, bank_from_name, extract, write_csv
 from txid import differences, stamp_ids
 
 # Absolute paths (config.py), so it runs from any working directory.
-HERE = config.WORK                                   # workspace/
-ROOT = config.ROOT                                   # project root
+HERE = config.WORK  # workspace/
+ROOT = config.ROOT  # project root
 
 # Parsed rows per PDF, so an update only reads statements it hasn't read before (re-reading all 9 took ~40 s). An entry
 # is keyed by the file's bytes plus everything else that shapes its rows: the parser code (extract_ledger.py + banks/),
@@ -53,11 +54,11 @@ ROOT = config.ROOT                                   # project root
 # It holds transactions like ledger.csv: private (0600), git-ignored, deleted by clear.sh; entries no PDF uses any
 # more go after each good run.
 CACHE = os.path.join(HERE, ".cache")
-USED: set[str] = set()      # entries this run used (the rest are pruned)
+USED: set[str] = set()  # entries this run used (the rest are pruned)
 CACHE_SETTINGS = ("LEDGER_CASH_REF", "LEDGER_PEER_REF", "LEDGER_STOCK_REF")
 
 
-def passwords(cache=[]):
+def passwords(cache=[]):  # noqa: B006  # the mutable default is the cache, kept for the whole run
     """--password= and passwords typed during this run, reused for the next files."""
     if not cache:
         cache += [a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--password=")]
@@ -70,7 +71,7 @@ def candidates(path):
     own = bank_from_name(path)
     keys = [*(own.passwords if own else ()), *(k for b in BANKS for k in b.passwords)]
     out = []
-    for pw in (None, *(os.environ.get(k) for k in keys), *passwords()):   # None: the file may not be encrypted
+    for pw in (None, *(os.environ.get(k) for k in keys), *passwords()):  # None: the file may not be encrypted
         if pw not in out and (pw is None or pw):
             out.append(pw)
     return out
@@ -89,8 +90,10 @@ def parser_code() -> tuple[bytes, ...]:
     if config.FROZEN:
         files = [sys.executable]
     else:
-        files = [os.path.join(config.HERE, "extract_ledger.py"),
-                 *sorted(glob.glob(os.path.join(config.HERE, "banks", "*.py")))]
+        files = [
+            os.path.join(config.HERE, "extract_ledger.py"),
+            *sorted(glob.glob(os.path.join(config.HERE, "banks", "*.py"))),
+        ]
     out = []
     for f in files:
         with open(f, "rb") as fh:
@@ -103,7 +106,7 @@ def cache_entry(path) -> str:
         pdf = f.read()
     parts = [pdf, pdfplumber.__version__.encode(), *(os.environ.get(k, "").encode() for k in CACHE_SETTINGS)]
     digests = [hashlib.sha256(p).digest() for p in parts]
-    digests[1:1] = parser_code()     # after the PDF's: the same key as when the files were hashed here one by one
+    digests[1:1] = parser_code()  # after the PDF's: the same key as when the files were hashed here one by one
     key = hashlib.sha256(b"".join(digests)).hexdigest()[:40]
     USED.add(key)
     return os.path.join(CACHE, key + ".json")
@@ -135,7 +138,7 @@ def load(path):
         print(hit["log"], end="")
         return hit["rows"]
     except (OSError, ValueError, KeyError):
-        pass                       # not read before (or an unreadable entry): read the PDF
+        pass  # not read before (or an unreadable entry): read the PDF
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         rows = read_pdf(path)
@@ -157,14 +160,18 @@ def read_pdf(path):
     for pw in candidates(path):
         try:
             return extract(path, pw)
-        except PdfminerException as e:   # pdfplumber wraps every open/decrypt failure in this: wrong or missing
-            errors.append(e)             # password. Anything else is a parser problem: let it reach main()'s SKIP
-    if not sys.stdin.isatty():      # the Gmail listener / a script: nobody to ask. Stop rather than write a ledger missing this file.
+        except PdfminerException as e:  # pdfplumber wraps every open/decrypt failure in this: wrong or missing
+            errors.append(e)  # password. Anything else is a parser problem: let it reach main()'s SKIP
+    if (
+        not sys.stdin.isatty()
+    ):  # the Gmail listener / a script: nobody to ask. Stop rather than write a ledger missing this file.
         keys = " / ".join(b.passwords[0] for b in BANKS)
-        sys.exit(f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
-                 f"in the env settings (see .env.example), run {config.command('run')} --setup, or run this by hand to "
-                 "type it. "
-                 "Ledger left unchanged.")
+        sys.exit(
+            f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
+            f"in the env settings (see .env.example), run {config.command('run')} --setup, or run this by hand to "
+            "type it. "
+            "Ledger left unchanged."
+        )
     named = bank_from_name(path)
     last = None
     for _ in range(3):
@@ -175,7 +182,7 @@ def read_pdf(path):
             last = e
             print(f"  that password doesn't open it ({why(e)})")
             continue
-        passwords().append(pw)      # reuse for the next file
+        passwords().append(pw)  # reuse for the next file
         return rows
     raise last
 
@@ -191,17 +198,26 @@ def own_transfers(rows):
 
     A pair = same amount, opposite direction, different banks, within 2 minutes. Both rows become
     "Own transfer", which the dashboard leaves out of income, expenses and the spend rate.
-    ponytail: greedy 1:1 scan; an unrelated same-amount pair inside 2 minutes would also match.
+    ponytail: greedy 1:1 scan; an unrelated same-amount pair inside 2 minutes would also match. If a real payment
+    ever turns up as "Own transfer", also require the other bank's name or account in the description.
     """
-    when = lambda r: datetime.fromisoformat(r["Date"])   # time is optional
+    when = lambda r: datetime.fromisoformat(r["Date"])  # time is optional
     banks = [r for r in rows if r.get("Bank") not in (None, "", "Manual")]
     used = set()
     for a in banks:
         if float(a["Amount"]) >= 0 or a["ID"] in used:
             continue
-        b = next((b for b in banks if b["ID"] not in used and b["Bank"] != a["Bank"]
-                  and abs(float(b["Amount"]) + float(a["Amount"])) < 0.005
-                  and abs(when(b) - when(a)) <= timedelta(minutes=2)), None)
+        b = next(
+            (
+                b
+                for b in banks
+                if b["ID"] not in used
+                and b["Bank"] != a["Bank"]
+                and abs(float(b["Amount"]) + float(a["Amount"])) < 0.005
+                and abs(when(b) - when(a)) <= timedelta(minutes=2)
+            ),
+            None,
+        )
         if b:
             used |= {a["ID"], b["ID"]}
             a["Category"] = b["Category"] = "Own transfer"
@@ -212,7 +228,7 @@ def main(progress=None) -> int:
     """progress(stage, done=0, total=0), if given, hears each stage as it starts ("read" per file, "merge",
     "build"): the add page's loader shows it."""
     step = progress or (lambda *a: None)
-    USED.clear()                # a long-running process (the app) calls main() again: prune from this run only
+    USED.clear()  # a long-running process (the app) calls main() again: prune from this run only
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     src_dir = args[0] if len(args) > 0 else os.path.join(ROOT, "Statement")
     dst = args[1] if len(args) > 1 else os.path.join(HERE, "ledger.csv")
@@ -232,13 +248,13 @@ def main(progress=None) -> int:
         except Exception as e:
             reason = (str(e).splitlines() or [type(e).__name__])[0][:60]
             skipped.append((name, reason))
-            detail = f": {e}" if isinstance(e, ValueError) else ""   # our own parse checks explain themselves
+            detail = f": {e}" if isinstance(e, ValueError) else ""  # our own parse checks explain themselves
             print(f"  SKIP {name}: could not read ({why(e)}{detail})")
             continue
         new = 0
         for r in stamp_ids(rows):
             old = by_id.get(r["ID"])
-            if old is not None:      # same minute + same signed amount + same occurrence = same transaction
+            if old is not None:  # same minute + same signed amount + same occurrence = same transaction
                 diff = differences(old, r)
                 if diff == ["description differs"]:
                     # Same money, new wording: the bank renamed the type in a later statement (e.g. จ่ายค่าสินค้า/บริการ
@@ -249,9 +265,10 @@ def main(progress=None) -> int:
                 elif diff:
                     conflicts.append(f"{r['Date']}  {float(r['Amount']):+,.2f}  in {name}: {', '.join(diff)}")
                 continue
-            by_id[r["ID"]] = r; merged.append(r); new += 1
-        print(f"  {name}: {len(rows):>4} rows, {new:>4} new, "
-              f"{len(rows) - new:>4} duplicate")
+            by_id[r["ID"]] = r
+            merged.append(r)
+            new += 1
+        print(f"  {name}: {len(rows):>4} rows, {new:>4} new, {len(rows) - new:>4} duplicate")
 
     if reworded:
         print(f"  {reworded} row(s) took the newer statement's wording for the same transaction")
@@ -263,32 +280,36 @@ def main(progress=None) -> int:
         with open(manual, newline="", encoding="utf-8-sig") as f:
             typed = list(csv.DictReader(f))
         extra = []
-        for n, r in enumerate(typed, 2):     # line 1 is the header
+        for n, r in enumerate(typed, 2):  # line 1 is the header
             try:
                 datetime.fromisoformat(r["Date"])
                 float(r["Amount"])
             except (KeyError, TypeError, ValueError):
-                print(f"  manual_entries.csv line {n} skipped: needs a Date like 2026-01-31 or 2026-01-31 14:05 "
-                      "and a numeric Amount")
+                print(
+                    f"  manual_entries.csv line {n} skipped: needs a Date like 2026-01-31 or 2026-01-31 14:05 "
+                    "and a numeric Amount"
+                )
                 continue
             extra.append(r)
         for r in extra:
             r["Bank"] = manual_bank(r)
         extra = stamp_ids(extra)
         added = early = 0
-        stmt = list(merged)          # statement rows only (before any manual row is added)
-        claimed = set()              # statement rows already matched to a manual row
-        first = {}                   # each bank's earliest statement row
+        stmt = list(merged)  # statement rows only (before any manual row is added)
+        claimed = set()  # statement rows already matched to a manual row
+        first = {}  # each bank's earliest statement row
         for s in stmt:
             first[s.get("Bank")] = min(first.get(s.get("Bank"), s["Date"]), s["Date"])
-        when = lambda r: datetime.fromisoformat(r["Date"])   # time is optional
+        when = lambda r: datetime.fromisoformat(r["Date"])  # time is optional
         for r in extra:
-            if r["ID"] in by_id:     # the bank statement already has it
+            if r["ID"] in by_id:  # the bank statement already has it
                 claimed.add(r["ID"])
-                print(f"  manual entry skipped, already in a statement: {r['Date']}  "
-                      f"{float(r['Amount']):+,.2f}  {r['Description']}")
+                print(
+                    f"  manual entry skipped, already in a statement: {r['Date']}  "
+                    f"{float(r['Amount']):+,.2f}  {r['Description']}"
+                )
                 continue
-            if r["Bank"] != "Manual":   # a payment email (fetch_gmail): its bank's statement row wins
+            if r["Bank"] != "Manual":  # a payment email (fetch_gmail): its bank's statement row wins
                 if r["Date"] < first.get(r["Bank"], "9999"):
                     # Older than that bank's statements (K PLUS mail goes back years): no statement to check it
                     # against, no income beside it, and a transfer in from your other bank would count twice.
@@ -298,19 +319,31 @@ def main(progress=None) -> int:
                 # bank's notice_window of a not-yet-matched statement row = same transaction.
                 # ponytail: fixed windows, 1:1 greedy; widen/narrow per bank if payments post later/earlier than that
                 window = BY_ID[r["Bank"]].notice_window if r["Bank"] in BY_ID else lambda s: (4, False)
-                hit = next((s for s in stmt if s["ID"] not in claimed and s.get("Bank") == r["Bank"]
-                            and float(s["Amount"]) == float(r["Amount"])
-                            and abs(when(s) - when(r)) <= timedelta(hours=window(s)[0])), None)
+                hit = next(
+                    (
+                        s
+                        for s in stmt
+                        if s["ID"] not in claimed
+                        and s.get("Bank") == r["Bank"]
+                        and float(s["Amount"]) == float(r["Amount"])
+                        and abs(when(s) - when(r)) <= timedelta(hours=window(s)[0])
+                    ),
+                    None,
+                )
                 if hit:
                     claimed.add(hit["ID"])
-                    print(f"  notice matched to statement row, skipped: {r['Date']}  {float(r['Amount']):+,.2f}  "
-                          f"(statement {hit['Date']})")
+                    print(
+                        f"  notice matched to statement row, skipped: {r['Date']}  {float(r['Amount']):+,.2f}  "
+                        f"(statement {hit['Date']})"
+                    )
                     if window(hit)[1]:
                         # The statement prints when the bank posted it (e.g. ~01:48 next day); the email says when it
                         # was paid. Keep the paid time. Amount, balance and ID stay the statement's.
                         hit["Date"] = r["Date"]
                     continue
-            by_id[r["ID"]] = r; merged.append(r); added += 1
+            by_id[r["ID"]] = r
+            merged.append(r)
+            added += 1
         print(f"  manual entries: {added} added of {len(extra)}")
         if early:
             print(f"  {early} payment email(s) left out: older than that bank's first statement row")
@@ -319,17 +352,19 @@ def main(progress=None) -> int:
         # Never overwrite a good ledger.csv with nothing.
         print("\nNo transactions were read — ledger and dashboard left unchanged.")
         if skipped:
-            print(f"  {len(skipped)} file(s) skipped (wrong/no password): "
-                  + ", ".join(n for n, _ in skipped))
+            print(f"  {len(skipped)} file(s) skipped (wrong/no password): " + ", ".join(n for n, _ in skipped))
         print("(Check the password, or that Statement/ holds valid PDFs.)")
         return 1
 
     if conflicts:
-        print(f"\n  CONFLICT: {len(conflicts)} transaction(s) appear in two statements with different details "
-              "(the earlier copy was kept; check them):")
+        print(
+            f"\n  CONFLICT: {len(conflicts)} transaction(s) appear in two statements with different details "
+            "(the earlier copy was kept; check them):"
+        )
         for c in conflicts:
             print(f"    {c}")
-    assert len({r["ID"] for r in merged}) == len(merged), "duplicate transaction IDs after merge"
+    if len({r["ID"] for r in merged}) != len(merged):  # not an assert: those vanish under python -O
+        raise AssertionError("duplicate transaction IDs after merge")
 
     own_transfers(merged)
     merged.sort(key=by_minute)
@@ -340,8 +375,7 @@ def main(progress=None) -> int:
     print(f"  {len(merged)} unique transactions")
     print(f"  {merged[0]['Date']}  ->  {merged[-1]['Date']}")
     if skipped:
-        print(f"  {len(skipped)} file(s) skipped (wrong/no password): "
-              + ", ".join(n for n, _ in skipped))
+        print(f"  {len(skipped)} file(s) skipped (wrong/no password): " + ", ".join(n for n, _ in skipped))
 
     # Rebuild the local dashboard from the freshly merged ledger.
     print()
@@ -351,61 +385,5 @@ def main(progress=None) -> int:
     return 0
 
 
-def selfcheck():
-    """python update_statement.py --selfcheck: a PDF is read once, then served from the cache (CHECK lines included)
-    until the file or a setting changes; pruning keeps only what the run used."""
-    import tempfile
-    global CACHE, read_pdf
-    assert [manual_bank({"Description": d}) for d in ("Bill / purchase (email) SHOP", "K PLUS Transfer out (email) X",
-                                                      "K PLUS lunch")] == ["KTB", "KBANK", "Manual"]   # pre-Bank-column rows
-    assert manual_bank({"Description": "Transfer out (email) X", "Bank": "KBANK"}) == "KBANK"
-    real_cache, real_read, reads = CACHE, read_pdf, []
-
-    def fake_read(path):
-        reads.append(path)
-        print("CHECK a.pdf: one row doesn't reconcile")
-        return [{"Date": "2026-01-01 10:00", "Description": "x", "Category": "Food", "Amount": "-1.00", "Balance": "9.00"}]
-
-    def quiet_load(path):
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            return load(path), buf.getvalue()
-
-    same_minute = [{"Date": "2026-01-01 10:00", "Balance": b} for b in ("150.00", "140.00", "130.00")]
-    assert [r["Balance"] for r in sorted(same_minute, key=by_minute)] == ["150.00", "140.00", "130.00"]
-
-    saved = os.environ.get(CACHE_SETTINGS[0])
-    try:
-        with tempfile.TemporaryDirectory() as d:
-            CACHE, read_pdf = os.path.join(d, "cache"), fake_read
-            pdf = os.path.join(d, "a.pdf")
-            open(pdf, "wb").write(b"%PDF-1 first")
-            (rows, log), (again, log2) = quiet_load(pdf), quiet_load(pdf)
-            assert rows == again and len(reads) == 1, reads                 # second load: the cache, no read
-            assert "CHECK" in log and log2 == log, (log, log2)             # the warning shows on every run
-            os.environ[CACHE_SETTINGS[0]] = "changed"
-            quiet_load(pdf)
-            assert len(reads) == 2, reads                                   # a setting changed: read again
-            open(pdf, "wb").write(b"%PDF-1 second")
-            quiet_load(pdf)
-            assert len(reads) == 3, reads                                   # the file changed: read again
-            USED.clear()
-            quiet_load(pdf)
-            prune_cache()
-            assert len(os.listdir(CACHE)) == 1, os.listdir(CACHE)           # older entries pruned
-            if os.name != "nt":   # Windows keeps files private by folder permissions, not mode bits
-                assert oct(os.stat(os.path.join(CACHE, os.listdir(CACHE)[0])).st_mode & 0o777) == "0o600"
-    finally:
-        CACHE, read_pdf = real_cache, real_read
-        if saved is None:
-            os.environ.pop(CACHE_SETTINGS[0], None)
-        else:
-            os.environ[CACHE_SETTINGS[0]] = saved
-    print("selfcheck ok")
-
-
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--selfcheck"]:
-        selfcheck()
-        raise SystemExit(0)
     raise SystemExit(main())

@@ -23,6 +23,7 @@ first visit swaps it for an HttpOnly, SameSite=Strict cookie and redirects to a 
 later request needs that cookie plus an X-Setup header other sites can't send. Passwords are kept in memory unless
 "remember" saves them to the settings file. Usage: python welcome.py [--add]
 """
+
 import contextlib
 import io
 import json
@@ -38,14 +39,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import config  # loads the project's env settings into os.environ
 import pdfplumber
+
+import config  # loads the project's env settings into os.environ
+import update_statement
 from build_dashboard import EXPECTED, OUT, build
 from extract_ledger import BANKS, BY_ID, bank_from_name, bank_from_text, extract
-import update_statement
 from update_statement import candidates
 
-MARK = "\033[1;35m▸\033[0m" if sys.stdout.isatty() else "▸"   # as in run.sh: bold violet on a terminal
+MARK = "\033[1;35m▸\033[0m" if sys.stdout.isatty() else "▸"  # as in run.sh: bold violet on a terminal
 
 
 def say(msg: str) -> None:
@@ -55,14 +57,16 @@ def say(msg: str) -> None:
 
 def note(msg: str) -> None:
     print(f"  {msg}", flush=True)
+
+
 STATEMENTS = os.path.join(config.ROOT, "Statement")
-ADD = "--add" in sys.argv[1:]                          # the short "add statements" page, not the full setup
-AGAIN = config.command("run") + ("" if ADD else " --setup")   # what gives a fresh page
-TOKEN = secrets.token_urlsafe(24)       # one-time: in the printed link, good for the first visit only
-SESSION = secrets.token_urlsafe(32)     # the cookie that visit gets; never printed or put in a URL
+ADD = "--add" in sys.argv[1:]  # the short "add statements" page, not the full setup
+AGAIN = config.command("run") + ("" if ADD else " --setup")  # what gives a fresh page
+TOKEN = secrets.token_urlsafe(24)  # one-time: in the printed link, good for the first visit only
+SESSION = secrets.token_urlsafe(32)  # the cookie that visit gets; never printed or put in a URL
 TOKEN_USED = threading.Event()
 MAX_PDF = 30 * 1024 * 1024
-FILES: dict[str, dict] = {}     # file name in Statement/ -> {bank, locked, ok, uploaded}
+FILES: dict[str, dict] = {}  # file name in Statement/ -> {bank, locked, ok, uploaded}
 LOCK = threading.Lock()
 # What finish() is doing, for the page's loader (/api/progress). Read without LOCK: finish() holds it while it runs.
 PROGRESS = {"stage": "", "done": 0, "total": 0}
@@ -75,13 +79,13 @@ def detect(path: str) -> dict:
     """Bank and lock state of one PDF: opened with no password or a saved one if possible (then its page-1
     text names the bank), else the file name; None = ask the user."""
     rows = update_statement.cached(path)
-    if rows is not None:               # read before (workspace/.cache): no need to open it, and no password needed
+    if rows is not None:  # read before (workspace/.cache): no need to open it, and no password needed
         return {"bank": rows[0].get("Bank") if rows else None, "locked": False, "ok": True}
     for pw in candidates(path):
         try:
             with pdfplumber.open(path, password=pw) as pdf:
                 text = pdf.pages[0].extract_text() or ""
-        except Exception:
+        except Exception:  # noqa: S112  # wrong password or not a PDF: try the next one
             continue
         b = bank_from_text(text) or bank_from_name(path)
         return {"bank": b.id if b else None, "locked": pw is not None, "ok": True}
@@ -98,7 +102,11 @@ def scan(quiet: bool = False) -> None:
     if quiet:
         return
     locked = sum(not f["ok"] for f in FILES.values())
-    note(f"{len(FILES)} PDF(s) already there" + (f", {locked} need a password" if locked else "") if FILES else "none yet")
+    note(
+        f"{len(FILES)} PDF(s) already there" + (f", {locked} need a password" if locked else "")
+        if FILES
+        else "none yet"
+    )
 
 
 def state() -> dict:
@@ -126,7 +134,7 @@ def upload(raw_name: str, data: bytes) -> dict:
     name = safe_name(raw_name)
     stem, n = name[:-4], 2
     while os.path.exists(os.path.join(STATEMENTS, name)) and open(os.path.join(STATEMENTS, name), "rb").read() != data:
-        name, n = f"{stem} ({n}).pdf", n + 1        # a different file with the same name: keep both
+        name, n = f"{stem} ({n}).pdf", n + 1  # a different file with the same name: keep both
     path = os.path.join(STATEMENTS, name)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as f:
@@ -139,14 +147,15 @@ def upload(raw_name: str, data: bytes) -> dict:
 
 
 def gmail() -> dict:
-    import fetch_gmail                 # Google's libraries load on the first press, not at every start
+    import fetch_gmail  # Google's libraries load on the first press, not at every start
+
     say("Fetching new statements from Gmail…")
     try:
         got, notices = fetch_gmail.pull(interactive=True)
     except (SystemExit, OSError) as e:  # no keys / sign-in refused, network or Gmail API error
         raise ValueError(f"Gmail: {e}") from e
     scan(quiet=True)
-    for path in got:                   # new this session: listed on the add page like an upload
+    for path in got:  # new this session: listed on the add page like an upload
         FILES[os.path.basename(path)]["uploaded"] = True
     note(f"{len(got)} new statement(s), {notices} payment notice(s)")
     return {"files": len(got), "notices": notices}
@@ -157,7 +166,7 @@ def unlock(bank: str, password: str, remember: bool) -> dict:
     if bank not in BY_ID:
         raise ValueError("Unknown bank.")
     names = [n for n, f in FILES.items() if f["bank"] == bank and not f["ok"]]
-    if not names:                      # nothing locked to check it against: don't keep or save an unchecked password
+    if not names:  # nothing locked to check it against: don't keep or save an unchecked password
         return {"ok": True, "files": 0, "rows": 0}
     bad, rows = [], 0
     for n in names:
@@ -168,7 +177,7 @@ def unlock(bank: str, password: str, remember: bool) -> dict:
         except Exception:
             bad.append(n)
             continue
-        update_statement.remember(path, got, buf.getvalue())   # the update then takes it from the cache: one read
+        update_statement.remember(path, got, buf.getvalue())  # the update then takes it from the cache: one read
         rows += len(got)
     if bad:
         note(f"{BY_ID[bank].name}: that password didn't open {len(bad)} file(s)")
@@ -177,12 +186,14 @@ def unlock(bank: str, password: str, remember: bool) -> dict:
         FILES[n]["ok"] = True
     key = BY_ID[bank].passwords[0]
     if remember:
-        config.save(key, password)     # also sets os.environ
+        config.save(key, password)  # also sets os.environ
         SAVED.add(bank)
     else:
-        os.environ[key] = password     # this run only: the build at "finish" uses it
-    note(f"{BY_ID[bank].name}: unlocked {len(names)} file(s), {rows} transactions"
-         + (" (password saved in the settings file)" if remember else " (password kept for this run only)"))
+        os.environ[key] = password  # this run only: the build at "finish" uses it
+    note(
+        f"{BY_ID[bank].name}: unlocked {len(names)} file(s), {rows} transactions"
+        + (" (password saved in the settings file)" if remember else " (password kept for this run only)")
+    )
     return {"ok": True, "files": len(names), "rows": rows}
 
 
@@ -192,8 +203,12 @@ def clean_plan(plan) -> list:
         name = str(i.get("name", "")).strip()[:80]
         amount = float(i.get("amount", 0))
         if name and 0 <= amount < 1e9 and i.get("every") in ("day", "month"):
-            item = {"id": str(i.get("id", ""))[:40] or secrets.token_hex(4), "name": name, "amount": round(amount, 2),
-                    "every": i["every"]}
+            item = {
+                "id": str(i.get("id", ""))[:40] or secrets.token_hex(4),
+                "name": name,
+                "amount": round(amount, 2),
+                "every": i["every"],
+            }
             if i.get("key"):
                 item["key"] = str(i["key"])[:300]
             out.append(item)
@@ -205,7 +220,7 @@ def finish(server, theme: str, plan) -> dict:
         if not re.fullmatch(r"[a-z0-9-]{1,30}", theme):
             raise ValueError("Bad theme.")
         config.save("THEME", theme)
-    if plan is not None:               # the add page sends none: the saved list stays as it is
+    if plan is not None:  # the add page sends none: the saved list stays as it is
         fd = os.open(EXPECTED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(clean_plan(plan), f, ensure_ascii=False)
@@ -215,9 +230,10 @@ def finish(server, theme: str, plan) -> dict:
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         try:
-            code = update_statement.main(progress=lambda stage, done=0, total=0:
-                                         PROGRESS.update(stage=stage, done=done, total=total))
-        except SystemExit as e:        # e.g. a file no known password opens
+            code = update_statement.main(
+                progress=lambda stage, done=0, total=0: PROGRESS.update(stage=stage, done=done, total=total)
+            )
+        except SystemExit as e:  # e.g. a file no known password opens
             print(e)
             code = 1
     PROGRESS.update(stage="failed" if code else "done")
@@ -226,8 +242,8 @@ def finish(server, theme: str, plan) -> dict:
     if code:
         say("The build stopped; the page shows why. Fix it there and press Try again.")
         return {"ok": False, "log": log[-3000:]}
-    if server is None:                 # the app window (app.py) goes back to the dashboard itself
-        for f in FILES.values():       # its next add page lists only files added after this update
+    if server is None:  # the app window (app.py) goes back to the dashboard itself
+        for f in FILES.values():  # its next add page lists only files added after this update
             f["uploaded"] = False
         say("Done. The dashboard is rebuilt.")
         return {"ok": True, "dashboard": OUT, "log": log[-1500:]}
@@ -271,6 +287,7 @@ class Server(ThreadingHTTPServer):
     """The page's server, its port for this program alone. http.server turns on SO_REUSEADDR, which on Windows lets
     another program (another account's too) bind the same 127.0.0.1 port and take the one-time link's visit. A random
     port (0) needs no reuse; Windows also gets SO_EXCLUSIVEADDRUSE."""
+
     allow_reuse_address = False
 
     def server_bind(self):
@@ -282,15 +299,15 @@ class Server(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     server_version = "LedgerSetup"
 
-    def log_message(self, *args):   # quiet: no request lines in the terminal
+    def log_message(self, *args):  # quiet: no request lines in the terminal
         pass
 
     def allowed(self) -> bool:
         port = self.server.server_address[1]
-        return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")   # no DNS rebinding
+        return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")  # no DNS rebinding
 
     def cookie_name(self) -> str:
-        return f"sv_setup_{self.server.server_address[1]}"   # cookies ignore ports: keep each run's apart
+        return f"sv_setup_{self.server.server_address[1]}"  # cookies ignore ports: keep each run's apart
 
     def signed_in(self) -> bool:
         jar = SimpleCookie(self.headers.get("Cookie") or "")
@@ -321,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/":
             given = parse_qs(url.query).get("setup", [""])[0]
             if given and secrets.compare_digest(given, TOKEN) and not TOKEN_USED.is_set():
-                TOKEN_USED.set()       # first visit: swap the link's token for a cookie, then drop it from the URL
+                TOKEN_USED.set()  # first visit: swap the link's token for a cookie, then drop it from the URL
                 self.send_response(303)
                 self.send_header("Set-Cookie", f"{self.cookie_name()}={SESSION}; HttpOnly; SameSite=Strict; Path=/")
                 self.send_header("Location", "/?setup&add" if ADD else "/?setup")
@@ -331,13 +348,14 @@ class Handler(BaseHTTPRequestHandler):
                 return None
             if self.signed_in():
                 return self.send(200, open(OUT, "rb").read(), "text/html; charset=utf-8")
-            return self.send(403, f"This link has already been used (or is wrong). Run {AGAIN} for a new one.".encode(),
-                             "text/plain")
+            return self.send(
+                403, f"This link has already been used (or is wrong). Run {AGAIN} for a new one.".encode(), "text/plain"
+            )
         if url.path == "/api/state" and self.api_ok():
             with LOCK:
                 return self.json(state())
         if url.path == "/api/progress" and self.api_ok():
-            return self.json(dict(PROGRESS))   # no LOCK: finish() holds it while the build runs
+            return self.json(dict(PROGRESS))  # no LOCK: finish() holds it while the build runs
         self.send(404, b"not found", "text/plain")
 
     def do_POST(self):
@@ -360,26 +378,10 @@ class Handler(BaseHTTPRequestHandler):
         self.json(out)
 
 
-def selfcheck() -> None:
-    """python welcome.py --selfcheck: file names and the spending list are cleaned before use."""
-    assert safe_name("../../etc/passwd") == "passwd.pdf"
-    assert safe_name("My Statement (1).PDF") == "My Statement (1).PDF"
-    assert safe_name("a;b|c.pdf") == "a_b_c.pdf"
-    plan = clean_plan([{"name": " Lunch ", "amount": 120, "every": "day"}, {"name": "", "amount": 5, "every": "day"},
-                       {"name": "Rent", "amount": -1, "every": "month"}, {"name": "X", "amount": 1, "every": "week"},
-                       {"name": "Phone", "amount": "299.5", "every": "month", "key": "k"}])
-    assert [(p["name"], p["amount"], p["every"]) for p in plan] == [("Lunch", 120, "day"), ("Phone", 299.5, "month")], plan
-    assert plan[1]["key"] == "k" and "key" not in plan[0]
-    print("selfcheck ok")
-
-
 def main() -> int:
-    if sys.argv[1:] == ["--selfcheck"]:
-        selfcheck()
-        return 0
     page = "The add-statements page" if ADD else "The setup page"
     say(f"Building {page.lower()} (it is part of the dashboard)")
-    build()                 # make sure web/dist/index.html (which holds the wizard) is current
+    build()  # make sure web/dist/index.html (which holds the wizard) is current
     say("Looking at the statements already in Statement/")
     scan()
     server = Server(("127.0.0.1", 0), Handler)

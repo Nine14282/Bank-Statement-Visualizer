@@ -1,0 +1,66 @@
+# Dependencies of Statement Visualizer (an application, not a package: no build system, uv installs only the
+# dependencies). uv.lock is the lock. requirements.txt and requirements-app.txt are generated from it for end users,
+# who install with pip (launcher.py); regenerate them after changing anything here:
+#   uv export --frozen --no-dev --no-emit-project --quiet --output-file=requirements.txt
+#   uv export --frozen --no-dev --no-emit-project --quiet --extra=app --output-file=requirements-app.txt
+[project]
+name = "statement-visualizer"
+version = "0.0.0"   # uv requires one; the release version comes from the git tag in CI
+requires-python = ">=3.10"
+dependencies = [
+    "pdfplumber>=0.11,<0.12",
+    "google-auth-oauthlib>=1.2",
+]
+
+[project.optional-dependencies]
+# The app window. Linux: Qt's web view (Chromium), all from pip (~550 MB installed). macOS uses its own WebKit.
+app = [
+    "pywebview>=6,<7",
+    "PyQt6>=6.5,<7; sys_platform == 'linux'",
+    "PyQt6-WebEngine>=6.5,<7; sys_platform == 'linux'",
+    "QtPy>=2; sys_platform == 'linux'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff==0.17.1",   # same version as the ruff-pre-commit rev
+    "pre-commit",
+]
+# Only to build the standalone program (statement-visualizer.spec).
+build = [
+    "pyinstaller==6.22.3",
+    # The Windows build's app window: pywebview on WebView2 (pythonnet comes with it there). Windows only: elsewhere
+    # the build opens the pages in the browser.
+    "pywebview>=6,<7; sys_platform == 'win32'",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["workspace"]
+
+[tool.uv]
+required-version = "==0.11.26"   # one uv everywhere (local, hook rev, setup-uv), so uv.lock doesn't flip between versions
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["workspace", "tests"]   # so isort knows config, banks, txid are first-party
+
+[tool.ruff.lint]
+# cookiecutter-uv's set minus C90 and TRY (noisy here)
+select = ["YTT", "S", "B", "A", "C4", "T10", "SIM", "I", "E", "W", "F", "PGH", "UP", "RUF"]
+ignore = [
+    "E501",   # the formatter owns line length
+    "E731",   # named lambdas are this code's style
+    "SIM115",   # open(...).read() one-liners are this code's style; the lock files stay open on purpose
+]
+
+[tool.ruff.lint.pyflakes]
+allowed-unused-imports = ["config"]   # `import config` loads the settings file on import
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106", "S108"]   # asserts, fake passwords/tokens and temp paths in tests
+"workspace/launcher.py" = ["S603", "S607", "S605"]   # runs pip / the OS opener / its own launcher on purpose
+"workspace/app.py" = ["S603", "S607"]   # runs the OS opener
+"workspace/fetch_gmail.py" = ["S603", "S607"]   # opens the OS browser/opener

@@ -7,7 +7,7 @@ Two ways to run it, with the same commands:
     exists, with whatever Python it was given. The workspace scripts run in .venv's Python.
   The PyInstaller build (statement-visualizer.spec; Windows needs no Python then): this is the .exe's entry point.
     No .venv and no pip: the packages are inside the build. Double-clicking the .exe = run. Your data goes next to the
-    .exe; the workspace scripts run as the .exe again (--script <name>, see config.SCRIPTS).
+    .exe; the workspace scripts run as the .exe again (--script <name>, see config.SCRIPTS). The .exe's --smoke imports everything the build must hold (CI).
 
   launcher.py install [--app|--web]   set up without opening anything (./install.sh)
   launcher.py setup [--app|--web]     the same, then opens the app (./setup.sh)
@@ -16,35 +16,42 @@ Two ways to run it, with the same commands:
   launcher.py clear [-y]              ./clear.sh
   launcher.py uninstall [--all] [-y] [-n]   ./uninstall.sh
 """
+
+import contextlib
 import os
 import re
 import shutil
 import subprocess
 import sys
 
-if sys.version_info < (3, 10):
-    sys.exit("Python 3.10 or newer is required (this is %d.%d). Get it from https://www.python.org/downloads/"
-             % sys.version_info[:2])
+if sys.version_info < (3, 10):  # noqa: UP036  # runs on whatever Python the user has: explain before anything breaks
+    sys.exit(
+        f"Python 3.10 or newer is required (this is {sys.version_info[0]}.{sys.version_info[1]}). "
+        "Get it from https://www.python.org/downloads/"
+    )
 
 # The PyInstaller build: the data folder is the one the .exe is in, the shipped files are inside the bundle (APP).
 FROZEN = bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
-ROOT = os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# SV_ROOT redirects the data folder, as in config.py (the tests set it: this file chdirs to ROOT when imported).
+ROOT = os.environ.get("SV_ROOT") or (
+    os.path.dirname(sys.executable) if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 APP = sys._MEIPASS if FROZEN else ROOT
 WIN = os.name == "nt"
 MAC = sys.platform == "darwin"
 LINUX = sys.platform.startswith("linux")
 VPY = os.path.join(".venv", "Scripts", "python.exe") if WIN else os.path.join(".venv", "bin", "python")
 TTY_IN = bool(sys.stdin) and sys.stdin.isatty()
-LINK_NAME = "statement-visualizer"   # the Linux app-menu entry; app.py names its window and Qt folders the same
+LINK_NAME = "statement-visualizer"  # the Linux app-menu entry; app.py names its window and Qt folders the same
 
 os.chdir(ROOT)
 # Every Python started from here reads and prints UTF-8: Thai descriptions would crash on a Windows console's code page.
 # (The build ignores the environment; statement-visualizer.spec turns UTF-8 mode on in it instead.)
 os.environ["PYTHONUTF8"] = "1"
 if WIN:
-    os.system("")   # turns on colour codes in a Windows console (this one and every script run in it)
+    os.system("")  # turns on colour codes in a Windows console (this one and every script run in it)
 else:
-    os.umask(0o077)   # files we create (ledger, token, dashboard, settings) are readable by you only
+    os.umask(0o077)  # files we create (ledger, token, dashboard, settings) are readable by you only
 
 # Progress lines: "▸ step" (bold violet on a terminal), "  ✓ result". Each slow step says what it does first.
 COLOUR = sys.stdout.isatty()
@@ -61,7 +68,7 @@ def ok(msg):
 
 def cmd(name):
     """How to type one of the project's commands here (the same as config.command, which this file can't import)."""
-    if FROZEN:   # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
+    if FROZEN:  # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
         return f"{'.' + os.sep if WIN else './'}{os.path.basename(sys.executable)} {name}"
     return rf"py workspace\launcher.py {name}" if WIN else f"./{name}.sh"
 
@@ -101,22 +108,24 @@ def installed_mode():
 
 # --- install / setup -----------------------------------------------------------------------------------------------
 
+
 def setup(args, open_after=True):
     """Python venv + packages, settings file, blank dashboard, launcher. Safe to re-run. No Node.js needed: the dashboard
     page ships prebuilt (web/prebuilt/index.html) and Python fills in your data. --app: app window (pywebview, and the
     launcher); --web: browser only. Default: the mode already installed, else app (web on Windows: the app window
-    there isn't ready yet). The PyInstaller build is always web, with its packages inside: only the files part runs."""
-    mode = installed_mode() or ("web" if WIN else "app")
+    there isn't ready yet from source). The PyInstaller build has its packages inside: only the files part runs; its app
+    window is Windows' own web view (WebView2), so elsewhere it is always web."""
+    mode = installed_mode() or ("web" if WIN and not FROZEN else "app")
     for a in args:
         if a not in ("--app", "--web"):
             sys.exit(f"usage: {cmd('install')} [--app|--web]")
         mode = a[2:]
-    if FROZEN:
-        if mode == "app":
-            print("(This build has no app window yet: the pages open in your browser.)")
-        mode = "web"
-    else:
+    if not FROZEN:
         install_packages(mode)
+    elif not WIN:
+        if mode == "app":
+            print("(This build has no app window here: the pages open in your browser.)")
+        mode = "web"
 
     prepare()
 
@@ -130,25 +139,27 @@ def setup(args, open_after=True):
 
     run = cmd("run")
     if mode == "web":
-        print(f"""
+        print(
+            f"""
 Setup done (browser mode). Run {run}: it opens the setup and add-statements pages in your browser.
   First time: it walks you through adding statements, passwords, a theme and your expected spending.
   Leave that terminal open while you use the page; the dashboard opens in your browser when it is built.
-  {cmd('gmail'):<18}  optional: download statements from Gmail, then build (see README for the Google setup)""" +
-              ("" if FROZEN else f"\n  Want the app window instead? {cmd('install')} --app"))
+  {cmd("gmail"):<18}  optional: download statements from Gmail, then build (see README for the Google setup)"""
+            + ("" if FROZEN else f"\n  Want the app window instead? {cmd('install')} --app")
+        )
         return 0
     print(f"""
-Setup done. From now on everything happens in the app: {'Statement Visualizer in your app menu, or ' if LINUX else ''}{run}.
+Setup done. From now on everything happens in the app: {"Statement Visualizer in your app menu, or " if LINUX else ""}{run}.
   First time: it walks you through adding statements, passwords, a theme and your expected spending.
   Later: Add statements (top bar) for new PDFs, the gear for settings.
-  {cmd('gmail'):<18}  optional: download statements from Gmail, then build (see README for the Google setup)
+  {cmd("gmail"):<18}  optional: download statements from Gmail, then build (see README for the Google setup)
 No app window possible here? {run} opens the same pages in your browser instead.
 Updating from an older version? Run one update (Add statements, Update) so the ledger gets the new Bank column.""")
     # Open the app now (the first-time setup runs in it), unless install or run called this (open_after: the first
     # installs only, the second opens the app itself) or nobody is at the terminal. Detached: this terminal can close.
     if open_after and TTY_IN:
         say("Opening the app")
-        detach([sys.executable, os.path.abspath(__file__), "run", "--app"])
+        detach([sys.executable, *([] if FROZEN else [os.path.abspath(__file__)]), "run", "--app"])
     return 0
 
 
@@ -177,27 +188,45 @@ def install_packages(mode):
             subprocess.check_call([sys.executable, "-m", "venv", ".venv"])
             ok("created")
     except subprocess.CalledProcessError:
-        sys.exit("Couldn't create the Python environment."
-                 + (" Debian/Ubuntu: sudo apt install python3-venv, then again." if LINUX else ""))
+        sys.exit(
+            "Couldn't create the Python environment."
+            + (" Debian/Ubuntu: sudo apt install python3-venv, then again." if LINUX else "")
+        )
 
     if mode == "app" and LINUX:
-        say("Installing Python packages (pdfplumber, Google sign-in, the app window's Qt web view: a ~200 MB "
-            "download): a few minutes the first time")
+        say(
+            "Installing Python packages (pdfplumber, Google sign-in, the app window's Qt web view: a ~200 MB "
+            "download): a few minutes the first time"
+        )
     else:
-        say(f"Installing Python packages (pdfplumber, Google sign-in{', app window' if mode == 'app' else ''}, ...): "
-            "about a minute the first time")
-    if subprocess.call([VPY, "-m", "pip", "install", "--quiet", "--upgrade", "pip"]) or \
-            subprocess.call([VPY, "-m", "pip", "install", "--quiet", "-r", "requirements.txt"]):
+        say(
+            f"Installing Python packages (pdfplumber, Google sign-in{', app window' if mode == 'app' else ''}, ...): "
+            "about a minute the first time"
+        )
+    if subprocess.call([VPY, "-m", "pip", "install", "--quiet", "--upgrade", "pip"]) or subprocess.call(
+        [VPY, "-m", "pip", "install", "--quiet", "-r", "requirements.txt"]
+    ):
         sys.exit(f"Installing the packages failed (no internet?). Run {cmd('install')} again.")
     # The app window's packages may fail without failing the install: a computer with no ready-made Qt package (32-bit
     # ARM, an old glibc) would otherwise try to compile Qt. Then app.py finds no window and run uses the browser pages.
-    if mode == "app" and subprocess.call([VPY, "-m", "pip", "install", "--quiet",
-                                          "--only-binary=PyQt6,PyQt6-Qt6,PyQt6-sip,PyQt6-WebEngine,PyQt6-WebEngine-Qt6",
-                                          "-r", "requirements-app.txt"]):
-        print("  (The app window's package didn't install here, so the app opens in your browser. "
-              f"Run {cmd('install')} to try again.)")
+    if mode == "app" and subprocess.call(
+        [
+            VPY,
+            "-m",
+            "pip",
+            "install",
+            "--quiet",
+            "--only-binary=PyQt6,PyQt6-Qt6,PyQt6-sip,PyQt6-WebEngine,PyQt6-WebEngine-Qt6",
+            "-r",
+            "requirements-app.txt",
+        ]
+    ):
+        print(
+            "  (The app window's package didn't install here, so the app opens in your browser. "
+            f"Run {cmd('install')} to try again.)"
+        )
     with open(os.path.join(".venv", "requirements.installed"), "wb") as f:
-        f.write(reqs_text(mode))   # run reinstalls when this differs from the requirements files
+        f.write(reqs_text(mode))  # run reinstalls when this differs from the requirements files
     with open(os.path.join(".venv", "mode"), "w", encoding="utf-8") as f:
         f.write(mode + "\n")
     ok("Python packages ready")
@@ -207,9 +236,11 @@ def prepare():
     say("Preparing folders and your private settings file")
     try:
         prepare_files()
-    except OSError as e:   # e.g. the build unpacked into Program Files, which only an administrator may write
-        sys.exit(f"Can't set up {e.filename or ROOT} ({e.strerror or e}). Move the whole folder somewhere of yours "
-                 "(e.g. Documents\\StatementVisualizer) and run it from there.")
+    except OSError as e:  # e.g. the build unpacked into Program Files, which only an administrator may write
+        sys.exit(
+            f"Can't set up {e.filename or ROOT} ({e.strerror or e}). Move the whole folder somewhere of yours "
+            "(e.g. Documents\\StatementVisualizer) and run it from there."
+        )
     ok("Statement/ folder and settings ready")
 
 
@@ -218,22 +249,28 @@ def check_build_folder():
     delete there: so the folder must be its own. Refused: your home, Desktop, Downloads, Documents, a drive's root.
     Windows also warns outside your user folder: os.chmod doesn't keep other accounts out there, the folder's
     permissions do, and a new folder at C:\\ lets every account read it."""
+
     def real(p):
         return os.path.normcase(os.path.realpath(p))
+
     here, home = real(ROOT), os.path.expanduser("~")
     shared = {real(home), *(real(os.path.join(home, d)) for d in ("Desktop", "Downloads", "Documents", "OneDrive"))}
     if here in shared or os.path.dirname(here) == here:
-        sys.exit(f"{ROOT} holds your other files too. Put StatementVisualizer.exe and its _internal folder in a folder "
-                 "of their own (e.g. Documents\\StatementVisualizer) and run it from there.")
+        sys.exit(
+            f"{ROOT} holds your other files too. Put StatementVisualizer.exe and its _internal folder in a folder "
+            "of their own (e.g. Documents\\StatementVisualizer) and run it from there."
+        )
     if WIN and not here.startswith(real(home) + os.sep):
-        print(f"Note: {ROOT} is outside your user folder ({home}), so other accounts on this PC may be able to read "
-              "your statements and saved passwords here. A folder under Documents keeps them private.")
+        print(
+            f"Note: {ROOT} is outside your user folder ({home}), so other accounts on this PC may be able to read "
+            "your statements and saved passwords here. A folder under Documents keeps them private."
+        )
 
 
 def prepare_files():
     """The data folders and the private settings file (.env, from the shipped .env.example). Safe to re-run."""
     os.makedirs("Statement", exist_ok=True)
-    os.makedirs("workspace", exist_ok=True)   # the build's data folder starts empty
+    os.makedirs("workspace", exist_ok=True)  # the build's data folder starts empty
     template = os.path.join(APP, ".env.example")
     if not os.path.exists(".env"):
         shutil.copyfile(template, ".env")
@@ -254,16 +291,19 @@ def detach(argv):
     """Start a process that outlives this one and this terminal."""
     if WIN:
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(argv, creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            argv, creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     else:
-        subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            argv, start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
 
 
 def desktop_entry():
-    return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"),
-                        "applications", f"{LINK_NAME}.desktop")
+    return os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "applications", f"{LINK_NAME}.desktop"
+    )
 
 
 def make_launcher():
@@ -272,16 +312,18 @@ def make_launcher():
     this folder to double-click. Windows: none yet (the app window there is the next step)."""
     if LINUX:
         desk = desktop_entry()
-        if os.path.exists(desk) or (TTY_IN and not ask("Add Statement Visualizer to your app menu? [Y/n] ").lower()
-                                    .startswith("n")):
+        if os.path.exists(desk) or (
+            TTY_IN and not ask("Add Statement Visualizer to your app menu? [Y/n] ").lower().startswith("n")
+        ):
             os.makedirs(os.path.dirname(desk), exist_ok=True)
-            # ponytail: the path is quoted, not escaped; a project path containing " $ ` or \ breaks the launcher
+            # ponytail: the path is quoted, not escaped; a project path containing " $ ` or \ breaks the launcher.
+            # Escape them per the Desktop Entry spec on the first report of such a path.
             with open(desk, "w", encoding="utf-8") as f:
                 f.write(f"""[Desktop Entry]
 Type=Application
 Name=Statement Visualizer
 Comment=Your bank statements dashboard (local, offline)
-Exec="{os.path.join(ROOT, 'run.sh')}" --app
+Exec="{os.path.join(ROOT, "run.sh")}" --app
 Icon=x-office-spreadsheet
 Terminal=false
 Categories=Office;Finance;
@@ -290,12 +332,17 @@ Categories=Office;Finance;
         elif not TTY_IN:
             print(f"  (No terminal to ask, so no app-menu launcher. Run {cmd('install')} in a terminal to add it.)")
         if subprocess.call([VPY, "-c", "import PyQt6.QtWebEngineWidgets"], stderr=subprocess.DEVNULL):
-            print("  (Qt's web view doesn't load here, so the launcher opens your browser. See \"App window\" in "
-                  "README.md.)")
+            print(
+                "  (Qt's web view doesn't load here, so the launcher opens your browser. See \"App window\" in "
+                "README.md.)"
+            )
         elif os.environ.get("XDG_SESSION_TYPE") != "wayland" and subprocess.call(
-                [VPY, "-c", 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("xcb-cursor"))']):
-            print("  (No app window on this X11 desktop yet, so the launcher opens your browser. For the window: "
-                  "sudo apt install libxcb-cursor0)")
+            [VPY, "-c", 'import ctypes.util, sys; sys.exit(not ctypes.util.find_library("xcb-cursor"))']
+        ):
+            print(
+                "  (No app window on this X11 desktop yet, so the launcher opens your browser. For the window: "
+                "sudo apt install libxcb-cursor0)"
+            )
     elif MAC:
         name = "Statement Visualizer.command"
         with open(name, "w", encoding="utf-8") as f:
@@ -306,60 +353,73 @@ Categories=Office;Finance;
 
 # --- run -----------------------------------------------------------------------------------------------------------
 
+
 def run_cmd(args):
     """Option 1 (manual): statement PDFs -> ledger.csv -> web/dist/index.html
 
-      run                 the app: its own window with the dashboard, Add statements and Settings, or the first-time
-                          setup when there's no ledger yet. Installs what's missing first. No window possible here? The
-                          same setup or add-statements pages open in the browser
-      run --web           the browser pages instead of the app window (also the default after install --web)
-      run --setup         the full setup page again, in the browser (in the app: the Settings button)
-      run --app           the app, also with nobody at the terminal (what the launcher runs)
-      run --rebuild       no browser: rebuild from the PDFs already in Statement/ (asks for a password in the terminal
-                          if needed). Also what runs when nobody is at the terminal (a script)
-      run --password=...  rebuild with this password (visible in shell history)
+    run                 the app: its own window with the dashboard, Add statements and Settings, or the first-time
+                        setup when there's no ledger yet. Installs what's missing first. No window possible here? The
+                        same setup or add-statements pages open in the browser
+    run --web           the browser pages instead of the app window (also the default after install --web)
+    run --setup         the full setup page again, in the browser (in the app: the Settings button)
+    run --app           the app, also with nobody at the terminal (what the launcher runs)
+    run --rebuild       no browser: rebuild from the PDFs already in Statement/ (asks for a password in the terminal
+                        if needed). Also what runs when nobody is at the terminal (a script)
+    run --password=...  rebuild with this password (visible in shell history)
     """
     print(f"\n{B}Statement Visualizer{N}\n")
     flags = {a for a in args if a in ("--setup", "--rebuild", "--app", "--web")}
-    rest = [a for a in args if a not in flags]   # e.g. --password=...: means a terminal rebuild
+    rest = [a for a in args if a not in flags]  # e.g. --password=...: means a terminal rebuild
     setup_page, rebuild, app, web = ("--setup" in flags, "--rebuild" in flags, "--app" in flags, "--web" in flags)
 
     # .venv/mode: app or web (install --web = browser only, no pywebview). .venv/requirements.installed: the
     # requirements of the last good install; an update that changes them reinstalls here instead of failing quietly.
     mode = installed_mode() or ("web" if web or WIN else "app")
     if FROZEN:
-        # Nothing to install: the folders and settings file (new settings of a newer build too), then the pages.
-        if app:
-            print("(This build has no app window yet: the pages open in your browser.)")
-        mode = "web"
+        # Nothing to install: the folders and settings file (new settings of a newer build too), then the app window
+        # (Windows, WebView2) or the pages.
+        if app and not WIN:
+            print("(This build has no app window here: the pages open in your browser.)")
+        mode = "app" if WIN and not web else "web"
         prepare()
     elif not os.path.exists(VPY):
         say("First run: installing what it needs (Python packages). This happens once and takes about a minute.")
-        setup([f"--{mode}"], open_after=False)   # this command opens the app itself
+        setup([f"--{mode}"], open_after=False)  # this command opens the app itself
         print()
-    elif not os.path.exists(os.path.join(".venv", "requirements.installed")) or \
-            open(os.path.join(".venv", "requirements.installed"), "rb").read() != reqs_text(mode):
+    elif not os.path.exists(os.path.join(".venv", "requirements.installed")) or open(
+        os.path.join(".venv", "requirements.installed"), "rb"
+    ).read() != reqs_text(mode):
         say("Updating the Python packages (requirements changed). This takes about a minute.")
         setup([f"--{mode}"], open_after=False)
         print()
     if app and mode == "web" and not FROZEN:
-        sys.exit(f"Installed without the app window. Run {cmd('install')} --app to add it (or {cmd('run')} for the "
-                 "browser).")
+        sys.exit(
+            f"Installed without the app window. Run {cmd('install')} --app to add it (or {cmd('run')} for the browser)."
+        )
 
     ledger = os.path.join("workspace", "ledger.csv")
     # The app (launcher, or a person at the terminal): the dashboard, or the first-time setup with no ledger yet; it
     # adds statements and changes settings itself. Exit 3 = no window possible here: the browser pages below instead.
     if not (setup_page or rebuild or web or rest) and mode == "app" and (app or TTY_IN):
-        py("build_dashboard", quiet=True)   # a pull may bring a newer page
+        py("build_dashboard", quiet=True)  # a pull may bring a newer page
         say("Opening the app")
+        if own_console():  # a double-click: the app hides this console window once its own window is up
+            os.environ["SV_HIDE_CONSOLE"] = "1"
         code = py("app")
+        if os.environ.get("SV_HIDE_CONSOLE") and code not in (0, 3):
+            # app.py died without showing it again (a crash of the web view): show it, or the "Press Enter" pause
+            # below would wait in a hidden window, keeping this .exe and its mutex alive.
+            import ctypes
+
+            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 5)  # SW_SHOW
         # 3 = app.py found no window possible (also how abort() ends on Windows); 134 = Qt aborted (Linux, macOS)
         if code not in (3, 134):
             return code
         say("No app window here (see README); using the browser instead")
-        if app and os.path.exists(ledger):   # the launcher: just show the dashboard
+        if app and os.path.exists(ledger):  # the launcher: just show the dashboard
             import pathlib
             import webbrowser
+
             webbrowser.open(pathlib.Path("web", "dist", "index.html").resolve().as_uri())
             return 0
     if setup_page or not os.path.exists(ledger):
@@ -373,8 +433,10 @@ def run_cmd(args):
 
     os.makedirs("Statement", exist_ok=True)
     if not any(n.lower().endswith(".pdf") for n in os.listdir("Statement")):
-        sys.exit(f"No PDFs in Statement/. Run {cmd('run')} to add statements on a page, or copy them there and run "
-                 f"{cmd('run')} --rebuild.")
+        sys.exit(
+            f"No PDFs in Statement/. Run {cmd('run')} to add statements on a page, or copy them there and run "
+            f"{cmd('run')} --rebuild."
+        )
     say("Reading the statements in Statement/ and rebuilding your ledger")
     code = py("update_statement", *rest)
     if code:
@@ -385,6 +447,7 @@ def run_cmd(args):
 
 
 # --- gmail ---------------------------------------------------------------------------------------------------------
+
 
 def gmail(args):
     """Option 2: download new statement PDFs from Gmail into Statement/, then rebuild the dashboard. Read-only Gmail
@@ -403,6 +466,7 @@ def gmail(args):
 
 
 # --- clear ---------------------------------------------------------------------------------------------------------
+
 
 def clear(args):
     """Reset all your data, as on a fresh clone; the installed app stays (.venv, the launcher, the code). Deletes your
@@ -448,16 +512,30 @@ def clear(args):
 def data_files():
     """Your data, by name (never a whole folder of yours): statement PDFs, the ledger and the other files the scripts
     write, and the dashboard page, which holds your transactions inline. Those that exist."""
-    data = [os.path.join("Statement", n) for n in sorted(os.listdir("Statement")) if n.lower().endswith(".pdf")] \
-        if os.path.isdir("Statement") else []
-    data += [os.path.join("workspace", n) for n in sorted(os.listdir("workspace")) if n.endswith(".csv")] \
-        if os.path.isdir("workspace") else []
-    data += [p for p in (os.path.join("workspace", n) for n in ("expected.json", "token.json", "credentials.json",
-                                                                 ".gmail_seen.json", ".cache", ".app"))
-             if os.path.exists(p)]
+    data = (
+        [os.path.join("Statement", n) for n in sorted(os.listdir("Statement")) if n.lower().endswith(".pdf")]
+        if os.path.isdir("Statement")
+        else []
+    )
+    data += (
+        [os.path.join("workspace", n) for n in sorted(os.listdir("workspace")) if n.endswith(".csv")]
+        if os.path.isdir("workspace")
+        else []
+    )
+    data += [
+        p
+        for p in (
+            os.path.join("workspace", n)
+            for n in ("expected.json", "token.json", "credentials.json", ".gmail_seen.json", ".cache", ".app")
+        )
+        if os.path.exists(p)
+    ]
     # web/src/data: the dev server's copy, which the build never writes (and the folder may be someone else's there)
-    data += [p for p in ([] if FROZEN else [os.path.join("web", "src", "data")]) +
-             [os.path.join("web", "dist", "index.html")] if os.path.exists(p)]
+    data += [
+        p
+        for p in ([] if FROZEN else [os.path.join("web", "src", "data")]) + [os.path.join("web", "dist", "index.html")]
+        if os.path.exists(p)
+    ]
     return data
 
 
@@ -475,6 +553,7 @@ def remove(paths):
 
 
 # --- uninstall -----------------------------------------------------------------------------------------------------
+
 
 def uninstall(args):
     """Remove what install set up: the launcher, .venv, web/node_modules and the generated dashboard (and on Linux the
@@ -500,19 +579,28 @@ def uninstall(args):
     if os.path.abspath(ROOT) in (os.path.abspath(os.sep), os.path.expanduser("~")):
         sys.exit(f"Refusing to remove {ROOT}.")
 
-    items = [".venv", os.path.join("web", "node_modules"), os.path.join("web", "dist"), "Dashboard.html",
-             "Statement Visualizer.command"]
-    if LINUX:   # outside this folder: the app-menu entry (install), the app window's Qt cache and default profile
-        items = [desktop_entry(),
-                 os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), LINK_NAME),
-                 os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), LINK_NAME),
-                 ] + items
+    items = [
+        ".venv",
+        os.path.join("web", "node_modules"),
+        os.path.join("web", "dist"),
+        "Dashboard.html",
+        "Statement Visualizer.command",
+    ]
+    if LINUX:  # outside this folder: the app-menu entry (install), the app window's Qt cache and default profile
+        items = [
+            desktop_entry(),
+            os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), LINK_NAME),
+            os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), LINK_NAME),
+            *items,
+        ]
     found = [p for p in items if os.path.lexists(p)]
     print("Will delete:\n" + "\n".join(f"  {p}" for p in found) if found else "Nothing installed to remove.")
     if all_:
         pdfs = sum(n.lower().endswith(".pdf") for n in os.listdir("Statement")) if os.path.isdir("Statement") else 0
-        print(f"\nAND the whole folder {ROOT}, including:\n"
-              f"  Statement/ ({pdfs} PDF), workspace/ (ledger, saved Gmail login), .env (saved passwords, Gmail secret)")
+        print(
+            f"\nAND the whole folder {ROOT}, including:\n"
+            f"  Statement/ ({pdfs} PDF), workspace/ (ledger, saved Gmail login), .env (saved passwords, Gmail secret)"
+        )
     else:
         print("Kept: Statement/, workspace/ (ledger), .env, the code.")
     if dry:
@@ -545,8 +633,10 @@ def uninstall(args):
     print("Removed.")
     if not all_:
         print(f"Run {cmd('run')} to set it up again.")
-    if shutil.which("crontab") and "gmail.sh" in subprocess.run(["crontab", "-l"], capture_output=True,
-                                                                text=True).stdout:
+    if (
+        shutil.which("crontab")
+        and "gmail.sh" in subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    ):
         print("Reminder: a cron line runs ./gmail.sh. Remove it with: crontab -e")
     print("Reminder: if you used the Gmail download, also remove the app at https://myaccount.google.com/permissions")
     return 0
@@ -555,17 +645,28 @@ def uninstall(args):
 def uninstall_build(all_, yes, dry):
     """uninstall in the PyInstaller build, which installs nothing: plain = the generated dashboard; --all = also your
     data. Files by name only (data_files), then the data folders if that left them empty; never the folder itself
-    (Windows won't delete a running .exe anyway). Then it says what to delete by hand."""
+    (Windows won't delete a running .exe anyway). Then it says what to delete by hand.
+    Installed with StatementVisualizer-Setup.exe: hands over to its uninstaller instead, which removes the program and
+    asks about your data (statement-visualizer.iss)."""
+    if WIN and os.path.exists("unins000.exe") and not dry:
+        print("Starting the uninstaller (the same as Settings > Apps > Statement Visualizer > Uninstall).")
+        # This .exe exits at once, long before the uninstaller's first question is answered and it removes files.
+        subprocess.Popen([os.path.abspath("unins000.exe")])
+        return 0
     dist = os.path.join("web", "dist")
     items = [dist, "Dashboard.html"]
     if all_:
-        items = [p for p in data_files() if not p.startswith(dist)] + items + [
-            ".env", os.path.join("workspace", ".gmail.lock"), os.path.join("workspace", ".gmail-listen.lock")]
+        items = (
+            [p for p in data_files() if not p.startswith(dist)]
+            + items
+            + [".env", os.path.join("workspace", ".gmail.lock"), os.path.join("workspace", ".gmail-listen.lock")]
+        )
     found = [p for p in items if os.path.lexists(p)]
     print(f"In {ROOT}, will delete:\n" + "\n".join(f"  {p}" for p in found) if found else "Nothing to remove.")
     if all_:
-        print("  That is your data: statement PDFs, the ledger, saved Gmail login, .env (saved passwords, Gmail "
-              "secret).")
+        print(
+            "  That is your data: statement PDFs, the ledger, saved Gmail login, .env (saved passwords, Gmail secret)."
+        )
     else:
         print("Kept: Statement/, workspace/ (ledger), .env.")
     if dry:
@@ -586,24 +687,30 @@ def uninstall_build(all_, yes, dry):
             return 0
     failed = remove(found)
     if all_:
-        for d in ("web", "workspace", "Statement"):   # only if empty: anything else in them isn't ours to delete
-            try:
+        for d in ("web", "workspace", "Statement"):  # only if empty: anything else in them isn't ours to delete
+            with contextlib.suppress(OSError):
                 os.rmdir(d)
-            except OSError:
-                pass
     if found:
         print("Some files are still there (see above)." if failed else "Removed.")
-    if os.path.exists("unins000.exe"):   # installed with StatementVisualizer-Setup.exe (statement-visualizer.iss)
+    if os.path.exists("unins000.exe"):  # installed with StatementVisualizer-Setup.exe (statement-visualizer.iss)
         print("To remove the program too: close this window, then uninstall Statement Visualizer in Settings > Apps.")
     else:
-        print(f"To remove the program too: close this window, then delete {os.path.basename(sys.executable)} and the "
-              f"_internal folder in {ROOT} (or that whole folder, if nothing else of yours is in it).")
+        print(
+            f"To remove the program too: close this window, then delete {os.path.basename(sys.executable)} and the "
+            f"_internal folder in {ROOT} (or that whole folder, if nothing else of yours is in it)."
+        )
     print("Reminder: if you used the Gmail download, also remove the app at https://myaccount.google.com/permissions")
     return 0
 
 
-COMMANDS = {"install": lambda a: setup(a, open_after=False), "setup": setup, "run": run_cmd, "gmail": gmail,
-            "clear": clear, "uninstall": uninstall}
+COMMANDS = {
+    "install": lambda a: setup(a, open_after=False),
+    "setup": setup,
+    "run": run_cmd,
+    "gmail": gmail,
+    "clear": clear,
+    "uninstall": uninstall,
+}
 
 
 def run_script(argv):
@@ -612,10 +719,40 @@ def run_script(argv):
     import runpy
 
     import config
+
     if not argv or argv[0] not in config.SCRIPTS:
         sys.exit(f"--script: one of {', '.join(config.SCRIPTS)}")
     sys.argv = [argv[0] + ".py", *argv[1:]]
     runpy.run_module(argv[0], run_name="__main__", alter_sys=True)
+    return 0
+
+
+def smoke_modules():
+    """What the build must contain, for --smoke: every config.SCRIPTS module, plus the packages app.py and fetch_gmail.py
+    import only when they run (so importing the scripts alone doesn't prove them) and webview, the app window (Windows)."""
+    import config
+
+    return [
+        *config.SCRIPTS,
+        "pdfplumber",
+        "google.auth.transport.requests",
+        "google_auth_oauthlib",
+        *(["webview"] if WIN else []),
+    ]
+
+
+def smoke():
+    """The build only: --smoke imports all of smoke_modules(). 0 and "smoke ok", or 1 and the first import that failed."""
+    import importlib
+
+    for name in smoke_modules():
+        try:
+            importlib.import_module(name)
+        # Not only ImportError: a broken native package (pythonnet, clr_loader) can raise anything.
+        except Exception as e:
+            print(f"smoke: can't import {name}: {type(e).__name__}: {e}", file=sys.stderr)
+            return 1
+    print("smoke ok")
     return 0
 
 
@@ -625,19 +762,28 @@ def own_console():
     if not (WIN and FROZEN):
         return False
     import ctypes
+
     return ctypes.windll.kernel32.GetConsoleProcessList((ctypes.c_ulong * 2)(), 2) == 1
 
 
 def main(argv):
     if FROZEN and argv[:1] == ["--script"]:
         return run_script(argv[1:])
+    if FROZEN and argv == ["--smoke"]:
+        return smoke()
     if FROZEN and not argv:
-        argv = ["run"]   # a double-click on the .exe
+        argv = ["run"]  # a double-click on the .exe
     if not argv or argv[0] not in COMMANDS:
         name = cmd("").strip() if FROZEN else "launcher.py"
         sys.exit(f"usage: {name} {{{'|'.join(COMMANDS)}}} [options]")
     if FROZEN:
         check_build_folder()
+    if FROZEN and WIN and argv[0] in ("run", "gmail"):
+        # Tells Setup and its uninstaller this program is running (statement-visualizer.iss, AppMutex), so they ask to
+        # close it first instead of leaving its locked files behind. Never closed: Windows drops it when we exit.
+        import ctypes
+
+        ctypes.windll.kernel32.CreateMutexW(None, False, "StatementVisualizer")
     return COMMANDS[argv[0]](argv[1:])
 
 
@@ -648,13 +794,14 @@ if __name__ == "__main__":
         code = 130
     except SystemExit as e:
         code = e.code
-    except Exception:   # a bug or an unexpected error: shown, and the window waits (below) so it can be read
+    except Exception:  # a bug or an unexpected error: shown, and the window waits (below) so it can be read
         import traceback
+
         traceback.print_exc()
         code = 1
     # 130 = Ctrl+C: closing was asked for. TTY_IN: never wait on a pipe (a script, CI).
     if code not in (None, 0, 130) and TTY_IN and own_console():
-        if isinstance(code, str):   # sys.exit("message") prints it on exit: print it before the pause instead
+        if isinstance(code, str):  # sys.exit("message") prints it on exit: print it before the pause instead
             print(code, file=sys.stderr)
             code = 1
         ask("Press Enter to close this window.")
