@@ -5,8 +5,8 @@ changes, update this file to match. Read it before you add or restyle a screen.
 
 ## Style
 
-- **Feel:** a calm personal-banking app. The default is dark ("Midnight": near-black with a faint magenta tint),
-  with one violet accent and soft glows. Big geometric figures, small mono labels, rounded pills everywhere.
+- **Feel:** a calm personal-banking app. The default is light ("Daylight"); dark ("Midnight": near-black with a faint
+  magenta tint) is one click away. One violet accent and soft glows. Big geometric figures, small mono labels, rounded pills everywhere.
 - **Colour goes to money.** Violet/coral mark income/expense data, green/red mark good/bad. Decoration stays
   neutral: payee avatars are `bg-muted`, and icons are `text-muted-foreground`.
 - **Reference images:** copy their layout, scale, spacing and type treatment, but **never their colours**. Build every
@@ -55,33 +55,30 @@ The library is Motion (`motion/react`), wrapped in `<MotionConfig reducedMotion=
 - **Easing:** `EASE = [0.16, 1, 0.3, 1]` (`lib/utils.ts`), a fast start with a long settle. Use it for every tween.
 - **Entrances:** `Reveal` (`components/ledger/motion.tsx`) fades and lifts content 18px over 0.45s the first time it
   scrolls into view. Use `now` for above-the-fold content. Stagger siblings with `delay` 0.06–0.18.
-- **Figures:** headline numbers count up with `CountUp` (1.1s). Its `format` must be a module-level function.
-- **Selection:** a lit pill slides between options via a shared `layoutId` on a spring (stiffness 380–420, damping
-  30–32). Used in Nav, page tabs, `Segmented`, wizard steps and the payee ring.
+- **Figures:** headline numbers show their final value straight away; no count-up.
+- **Selection:** the picked option is lit in place, with no slide between options (Nav, page tabs, `Segmented`, the
+  payee ring, the Custom tab list). Only the setup wizard's step marker still slides (`layoutId`).
 - **Swaps:** use `AnimatePresence mode="wait"`. Chart views use a 0.15s fade; wizard steps slide x ±24px over 0.25s.
 - **Micro-interactions:** `hover:-translate-y-0.5` on round links, `active:scale-95` on buttons, and brighten on hover
   (`hover:brightness-110`).
 - **CSS keyframes** (in `index.css`): `.bar-in` (filled bar grows from the left), `.tx-new` (new-row highlight), `.hero-glow`
   (18s drift).
-- **Reduced motion:** every CSS animation has a `prefers-reduced-motion` off-switch, and every chart has
-  `isAnimationActive={!still}`. Animate transforms and opacity only.
-- **Desktop app window:** no animation. `workspace/app.py` opens the page with `?app` (`main.tsx` then sets
-  `MotionGlobalConfig.skipAnimations`) and asks the web view for reduced motion (CSS keyframes and charts; on Linux
-  Qt's Chromium, via `--force-prefers-reduced-motion`). Chosen when the window was WebKitGTK, which stuttered on the
-  entrances; the browser keeps everything. Hover colour transitions stay. Add statements opens the add
+- **Reduced motion:** every CSS animation has a `prefers-reduced-motion` off-switch. Animate transforms and opacity only.
+- **Charts:** no draw-in; every Recharts series has `isAnimationActive={false}` (its animation re-renders the SVG every
+  frame, about half the page's script work on load).
+- **Desktop app window:** animates like the browser, and follows the OS reduced-motion setting the same way. (It
+  used to skip every animation and force reduced motion: chosen under WebKitGTK, which stuttered on them; Qt's
+  Chromium doesn't, so they came back in 2026-10.) Add statements opens the add
   page over the dashboard in the same page (`App.tsx`, no page load, no transition); Dashboard (or Esc, except while
   uploading or building) closes it the same way. Text is selectable and Ctrl+wheel zooms, as in a tab (`app.py`). The window starts in the --background of the
   theme mode the page showed last (`themes.ts` tells `app.py`), so there's no flash of the other theme.
   Settings (gear, top bar) opens the full setup the same way, minus its Welcome screen. With no data yet the window
-  shows the full setup itself (the browser shows the No data yet page instead).
-  Exceptions, all around an update:
+  shows the full setup itself (so does the browser app at `?web`; a page opened from disk shows No data yet).
+  Around an update:
   - **Loader** (`wizard.tsx`): ring filling per statement read, stage icon, one- or two-word label (Starting, Reading
-    statements, Merging, Building dashboard, Done).
+    statements, Merging, Building dashboard, Done). It moves even under reduced motion (progress feedback).
   - **Finale** (`wizard.tsx`, Web Animations API): on Done the add page's content fades to its bare background (400ms)
-    and the page reloads with `?app&updated`.
-  - **Entrance** (`ARRIVE`, `lib/utils.ts`): that load plays the full entrance for `ARRIVE_MS` (3s from when the dashboard mounts): Motion on with
-    reduced motion ignored (`main.tsx`), charts and count-ups via `useStill()` (`lib/utils.ts`), CSS
-    via `.arriving` (`.bar-in`, and `appear` on the top bar and nav rail). Then the window is still again.
+    and the page reloads; the dashboard then plays its usual entrance.
 
 ## Color
 
@@ -117,9 +114,8 @@ Tokens live in `web/src/index.css`. Use them as Tailwind classes (`bg-card`, `te
 - **Status pills:** `bg-pos/15 text-pos` / `bg-neg/15 text-neg`.
 - **Direction bubbles:** `bg-income/15 text-income` / `bg-expense/15 text-expense`.
 - **Ratios:** `Index` turns red above 1.15× and green below 0.85×.
-- **Hex is allowed in three places only:**
+- **Hex is allowed in two places only:**
   - bank card skins and badges in `lib/banks.ts` (gradients deep enough for white text);
-  - MUI palette seeds in `lib/mui-theme.ts`, which feed only MUI internals;
   - `#fff` text on brand.
 - When a bank has no entry in `lib/banks.ts`, it falls back to `SKINS` (OKLCH gradients in `widgets.tsx`).
 - **Glows:** `.glow` blobs (`bg-brand`, `bg-expense`, blur 80px, opacity 0.16–0.22) sit behind the dashboard
@@ -127,11 +123,12 @@ Tokens live in `web/src/index.css`. Use them as Tailwind classes (`bg-card`, `te
 - **Emphasis:** the two lead cards get the `HERO` treatment (`ring-2 ring-brand/20 shadow-[0_28px_64px_-30px_var(--brand)]`,
   in `widgets.tsx`). Brand buttons get a brand-tinted drop shadow (`shadow-[0_8px_20px_-8px_var(--brand)]`).
 - **Themes** come from a registry: `THEMES` in `lib/themes.ts` (id, label, `light`/`dark` base, note). The `<html>`
-  element gets `data-theme="<id>"`, and MUI's colour scheme sets the `.dark`/`.light` class.
+  element gets `data-theme="<id>"` and the `.dark`/`.light` class (`applyTheme` in `lib/themes.ts`).
   - To add a theme: add one entry to `THEMES`, plus an optional `[data-theme="<id>"]` block in `index.css` that
     overrides tokens.
-  - The wizard's theme picker draws a mini dashboard with each theme's own tokens, so a new theme previews itself.
-  - Both shipped themes must keep working. Dark is the default.
+  - The first entry in `THEMES` is the default (Daylight). The setup has no theme step: the top-bar toggle switches,
+    and the `THEME` setting can set another default by hand.
+  - Both shipped themes must keep working.
 
 ## Font
 
@@ -141,7 +138,7 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 
 | Family | Token / helper | Used for |
 |---|---|---|
-| **Geist** (variable) | `--font-sans`, `font-sans` | body, UI text, MUI typography |
+| **Geist** (variable) | `--font-sans`, `font-sans` | body, UI text |
 | **Geist Mono** (variable) | `--font-mono`, `.num`, `.eyebrow`, `.pill` | every number, date and count (`.num` = tabular nums); labels |
 | **Outfit** (variable, latin) | `--font-display` = `--font-heading`, `.display`, `h1`, `h2`, `CardTitle` | headings and headline figures |
 
@@ -172,24 +169,19 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 | UI | React 19, TypeScript 6 |
 | Styling | Tailwind v4, CSS-first (`@theme inline` in `index.css`, no `tailwind.config`), `cn()` = clsx + tailwind-merge |
 | Components | shadcn/ui (CLI v4 run on demand via `npx shadcn@latest`; its CSS vendored as `src/shadcn.css`), style `base-nova` on **Base UI** (`@base-ui/react`, not Radix), base colour neutral, `class-variance-authority` |
-| Extra components | MUI 9 + Emotion, for pieces shadcn lacks here (below) |
 | Motion | Motion 14 (`motion/react`) |
 | Charts | Recharts 3 inside shadcn `ChartContainer` (`components/ui/chart.tsx`) |
 | Icons | `lucide-react` only |
 | Lint / types | `oxlint`, `tsc -b` (no UI tests) |
 
-- **CSS layering:** `main.tsx` wraps the app in `<StyledEngineProvider enableCssLayer>` and renders
-  `<GlobalStyles styles="@layer properties, theme, base, mui, components, utilities;" />` first. MUI's sheet lands in
-  `<head>` before Tailwind's, so the order must be declared there (an order line in `index.css` is not enough). MUI
-  therefore sits below Tailwind preflight and utilities, and a class beats MUI's own style without `!important`. Keep
-  hand-written helper classes (`.num`, `.display`, `.eyebrow`, `.pill`) inside `@layer components`: unlayered CSS beats
-  every utility.
-- **Dark class:** MUI uses `colorSchemeSelector: 'class'`, so it owns the `.dark`/`.light` class on `<html>`. `ThemeProvider` has `noSsr storageManager={null}`: the class is set on the first render and `ledger-theme` (`themes.ts`) is the only saved theme (no `mui-mode` copy). Tailwind
-  reads it via `@custom-variant dark (&:is(.dark *))`. The theme is applied before first paint in `main.tsx`.
-- **Styling MUI:** use `sx`/`slotProps` with CSS vars (`bgcolor: 'var(--card)'`, `border: '1px solid var(--border)'`).
-  Don't use MUI palette colours for surfaces.
-- **Hot reload of the built file:** each build writes `dist/version.js`, and the open page polls it every 10s and
-  reloads.
+- **CSS layering:** keep hand-written helper classes (`.num`, `.display`, `.eyebrow`, `.pill`) inside
+  `@layer components`: unlayered CSS beats every utility.
+- **Dark class:** `applyTheme` (`lib/themes.ts`) sets the `.dark`/`.light` class on `<html>`, before first paint in
+  `main.tsx` and on every theme change. `ledger-theme` is the only saved theme. Tailwind reads the class via
+  `@custom-variant dark (&:is(.dark *))`; each base block in `index.css` sets `color-scheme` so native controls follow.
+- **Live update of the built file:** each build writes `dist/version.js` and `dist/data.js`. Nothing polls: in the
+  app window, `app.py` calls `window.__ledgerUpdate()` after a Gmail rebuild and the page swaps the data in place
+  (`main.tsx`). A browser tab needs a reload.
 - **shadcn CLI:** after `npx shadcn add`, check the imports. It once emitted `from "cn"`; rewrite those to
   `@/lib/utils`.
 
@@ -209,13 +201,13 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
     opened from disk can't take PDFs itself;
   - Export CSV, an outline pill (in the app window it saves through `app.py`'s save dialog: pywebview turns page
     downloads off);
-  - a coverage bell (MUI `IconButton` + `Badge` dot + `Popover`, radius 18px);
+  - a coverage bell (icon button with a `--neg` dot + shadcn `Popover`, radius 18px);
   - a theme toggle that steps through `THEMES`;
-  - an initials `Avatar` on `var(--brand)`.
+  - an initials circle on `var(--brand)`.
 
   Icon buttons are 44px circles: `bg-card`, `border`, muted icon.
 - **`Nav`** is a floating rounded-full rail at the left edge on `md`+ and a bottom bar on phones. It uses 44px round
-  buttons, a sliding `bg-brand` pill and an MUI Tooltip for each label.
+  buttons, a sliding `bg-brand` pill and a `Tip` (shadcn `Tooltip`) for each label.
 
 ### Surfaces
 
@@ -236,30 +228,29 @@ single file. **No CDN or Google Fonts links**: the page must open offline from `
 - **Secondary / ghost:** `rounded-full border px-4 py-2 text-sm transition hover:bg-muted active:scale-95`.
 - **`RoundLink`** (`widgets.tsx`): a `size-10` round icon link that jumps to a section.
 - **shadcn `Button`:** only for small utility actions (presets, the sort-direction icon, ghost "View …" links).
-- **`Segmented`** (`widgets.tsx`): a `role="radiogroup"` pill with a sliding brand fill. Use it for main view and
-  range switches (year filter, chart view, 7d/30d/90d). Each instance needs its own `id`, which becomes its
-  `layoutId`.
+- **`Segmented`** (`widgets.tsx`): a `role="radiogroup"` pill with a brand fill on the picked option. Use it for
+  main view and range switches (year filter, chart view, 7d/30d/90d).
 - **shadcn `ToggleGroup` (`variant="outline"`):** use it for secondary sort and filter in dense card headers
   (category sort, transaction in/out filter).
 
 ### Data display
 
-- **Figures:** `.display` + `CountUp` for headline numbers. Everything numeric gets `.num`.
-- **Explanations:** `InfoTip` (`info.tsx`), an MUI Tooltip that opens on tap (`enterTouchDelay={0}`), on a "?" icon
-  button.
+- **Figures:** `.display` for headline numbers. Everything numeric gets `.num`.
+- **Explanations:** `InfoTip` (`info.tsx`), a shadcn `Popover` that opens on hover (`openOnHover`) and on tap, on a
+  "?" icon button. Not a tooltip: Base UI tooltips never open on touch.
 - **Labels and badges:** outline `Badge` for categories; `.pill` for step numbers and tags; a `late-night` chip as a
   small `rounded-full border` span.
 - **Progress:**
   - the bar in `MonthSpend`: one filled bar (`h-3.5`, full = the month's expected spending) with a `w-1` foreground
     line ringed in the card colour at "expected by today" (labelled under it); fill past the line is `--neg`, and the
     pill and sentence give the amount over, or saved (`--pos`);
-  - thin category bars (`h-1`, `scaleX`, fading opacity down the list);
-  - MUI `LinearProgress` (4px, `sx` colours from tokens).
+  - thin category bars (`h-1`, `scaleX`, fading opacity down the list).
 - **Tables:** shadcn `Table` in a `rounded-lg border` wrapper, mono-caps headers, right-aligned `.num` cells.
   `TxTable` mounts **either** the table (`lg`+) **or** the card list (`useSyncExternalStore` + `matchMedia`), never
-  both, at 15 rows per page with MUI `Pagination` (rounded-full, brand selected item).
+  both, at 15 rows per page. Long lists page with the shared `Pager` (`tx-table.tsx`, built on `pageItems` in
+  `lib/ledger.ts`; round buttons, brand current page): `TxTable` 15 per page, the Custom tab's payee list 10.
 - **`BankLogo`:** a round logo badge with an initials fallback. Bank name, skin and logo come from `lib/banks.ts`.
-- **`PayeeAvatar`:** an MUI Avatar in neutral `--muted`, with initials or a category icon.
+- **`PayeeAvatar`:** a round `--muted` span with initials or a category icon.
 
 ### Charts
 
@@ -279,14 +270,16 @@ These live in `charts.tsx`.
 
 ### Overlays and feedback
 
-- **MUI `Drawer`** (right, `min(420px, 100vw)`): transaction details and the label editor.
-- **MUI `Snackbar`:** toasts.
-- **MUI `Tooltip`:** labels for icon-only controls.
+- **shadcn `Sheet`** (right, `min(420px, 100vw)`): transaction details and the label editor.
+- **Toast:** a `role="status"` pill inside the sheet, gone after 2.2 s (`tx-drawer.tsx`).
+- **`Tip`** (`info.tsx`, shadcn `Tooltip`, 100 ms delay from `TooltipProvider` in `main.tsx`): labels for icon-only
+  controls.
 
 ### Installed shadcn components
 
-Only the ones in use are kept: `badge`, `button`, `card`, `chart`, `input`, `table`, `toggle-group` (+ `toggle`,
-which it imports). Tooltips are MUI's. The nav and page tabs are custom, so don't add shadcn `Sidebar` / `Tabs`. Before
+Only the ones in use are kept: `badge`, `button`, `card`, `chart`, `input`, `popover`, `sheet`, `table`,
+`toggle-group` (+ `toggle`, which it imports), `tooltip`. The CLI adds the npm package `cn` to package.json when it adds
+a component: uninstall it. The nav and page tabs are custom, so don't add shadcn `Sidebar` / `Tabs`. Before
 adding any other shadcn component, check that `index.css` still has the tokens it uses: the `sidebar-*` and
 `chart-1`…`chart-5` tokens were removed.
 

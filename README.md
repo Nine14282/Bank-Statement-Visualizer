@@ -63,14 +63,16 @@ The app opens a short setup (about 2 minutes):
 
 1. **Statements**: drop in your statement PDFs. The bank is detected for you.
 2. **Passwords**: bank PDFs are locked, one password per bank. Tick *Remember* to save it on this computer.
-3. **Theme** and **Spending** (what you spend each day or month; optional).
+3. **Spending** (what you spend each day or month; optional).
 4. **Gmail** (optional, [below](#gmail-optional)), then **Build my dashboard**.
 
 ## Everyday use
 
 - **Add statements** (top bar): drop the new PDFs, press **Update**. Duplicates are dropped, so overlapping statements
   are fine.
-- **Settings** (the gear): theme, expected spending, passwords, Gmail, **Open data folder**, **Delete all my data**.
+- **Settings** (the gear): statements (remove any you don't want), expected spending, passwords, Gmail, **Open data
+  folder**, **Delete all my data**. Gmail keys and the data folder stay hidden until you press **Show** and confirm.
+- **Theme**: the sun / moon button in the top bar. Light is the default.
 - **Export CSV** (top bar) saves the ledger for Excel.
 - Opening the app while it is open brings its window to the front.
 - No app window possible here (or installed with `--web`)? The same app opens in your browser. Nothing to keep open:
@@ -176,7 +178,7 @@ next update.
 | Setting | Effect |
 |---|---|
 | `ACCOUNT_HOLDER`, `ACCOUNT_LABEL` | your name: the avatar's initials and the greeting; the label goes in the avatar's tooltip |
-| `THEME` | default theme, `midnight` or `daylight` (the setup sets it) |
+| `THEME` | default theme, `daylight` (the default when blank) or `midnight` |
 | `LEDGER_CASH_REF` | the account number of your own cash channel → "Cash withdrawal / Cash deposit" |
 | `LEDGER_PEER_REF` | someone you lend to → "Lent out / Loan repaid to me" |
 | `LEDGER_STOCK_REF` | your investment account → "Stock investment / Stock return" |
