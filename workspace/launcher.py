@@ -67,7 +67,7 @@ def ok(msg):
 
 
 def cmd(name):
-    """How to type one of the project's commands here (the same as config.command, which this file can't import)."""
+    """How to type one of the project's commands here."""
     if FROZEN:  # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
         return f"{'.' + os.sep if WIN else './'}{os.path.basename(sys.executable)} {name}"
     return rf"py workspace\launcher.py {name}" if WIN else f"./{name}.sh"
@@ -134,26 +134,24 @@ def setup(args, open_after=True):
     if py("build_dashboard"):
         sys.exit("Building the dashboard page failed (see above).")
 
-    if mode == "app":
+    if mode == "app" or not FROZEN:  # from source the browser mode gets one too: it opens the app in the browser
         make_launcher()
 
     run = cmd("run")
     if mode == "web":
         print(
             f"""
-Setup done (browser mode). Run {run}: it opens the setup and add-statements pages in your browser.
-  First time: it walks you through adding statements, passwords, a theme and your expected spending.
-  Leave that terminal open while you use the page; the dashboard opens in your browser when it is built.
-  {cmd("gmail"):<18}  optional: download statements from Gmail, then build (see README for the Google setup)"""
+Setup done (browser mode). From now on: {"Statement Visualizer in your app menu, or " if LINUX else ""}{run}. The app
+opens in your browser: the first time it walks you through adding statements, passwords, a theme and your expected
+spending; later, Add statements (top bar) for new PDFs, the gear for settings and Gmail."""
             + ("" if FROZEN else f"\n  Want the app window instead? {cmd('install')} --app")
         )
         return 0
     print(f"""
 Setup done. From now on everything happens in the app: {"Statement Visualizer in your app menu, or " if LINUX else ""}{run}.
   First time: it walks you through adding statements, passwords, a theme and your expected spending.
-  Later: Add statements (top bar) for new PDFs, the gear for settings.
-  {cmd("gmail"):<18}  optional: download statements from Gmail, then build (see README for the Google setup)
-No app window possible here? {run} opens the same pages in your browser instead.
+  Later: Add statements (top bar) for new PDFs, the gear for settings and Gmail.
+No app window possible here? The same app opens in your browser instead.
 Updating from an older version? Run one update (Add statements, Update) so the ledger gets the new Bank column.""")
     # Open the app now (the first-time setup runs in it), unless install or run called this (open_after: the first
     # installs only, the second opens the app itself) or nobody is at the terminal. Detached: this terminal can close.
@@ -208,7 +206,7 @@ def install_packages(mode):
     ):
         sys.exit(f"Installing the packages failed (no internet?). Run {cmd('install')} again.")
     # The app window's packages may fail without failing the install: a computer with no ready-made Qt package (32-bit
-    # ARM, an old glibc) would otherwise try to compile Qt. Then app.py finds no window and run uses the browser pages.
+    # ARM, an old glibc) would otherwise try to compile Qt. Then app.py finds no window and run opens the app in the browser.
     if mode == "app" and subprocess.call(
         [
             VPY,
@@ -307,9 +305,10 @@ def desktop_entry():
 
 
 def make_launcher():
-    """One click to the dashboard, a launcher that runs run --app. Linux: an app-menu entry (outside this folder, so it
-    asks first; re-runs refresh it without asking, which also fixes the path after moving the folder). macOS: a file in
-    this folder to double-click. Windows: none yet (the app window there is the next step)."""
+    """One click to the app, a launcher that runs run --app (the window, or in browser mode the app in the browser).
+    Linux: an app-menu entry (outside this folder, so it asks first; re-runs refresh it without asking, which also fixes
+    the path after moving the folder). macOS: a file in this folder to double-click. Windows: the Setup's Start Menu
+    entry (statement-visualizer.iss); none from source."""
     if LINUX:
         desk = desktop_entry()
         if os.path.exists(desk) or (
@@ -331,7 +330,9 @@ Categories=Office;Finance;
             ok(f'App menu: search "Statement Visualizer" (to remove: rm {desk})')
         elif not TTY_IN:
             print(f"  (No terminal to ask, so no app-menu launcher. Run {cmd('install')} in a terminal to add it.)")
-        if subprocess.call([VPY, "-c", "import PyQt6.QtWebEngineWidgets"], stderr=subprocess.DEVNULL):
+        if installed_mode() == "web":
+            pass  # no window to check: the launcher opens the app in the browser
+        elif subprocess.call([VPY, "-c", "import PyQt6.QtWebEngineWidgets"], stderr=subprocess.DEVNULL):
             print(
                 "  (Qt's web view doesn't load here, so the launcher opens your browser. See \"App window\" in "
                 "README.md.)"
@@ -355,13 +356,13 @@ Categories=Office;Finance;
 
 
 def run_cmd(args):
-    """Option 1 (manual): statement PDFs -> ledger.csv -> web/dist/index.html
+    """Statement PDFs -> ledger.csv -> web/dist/index.html
 
     run                 the app: its own window with the dashboard, Add statements and Settings, or the first-time
                         setup when there's no ledger yet. Installs what's missing first. No window possible here? The
-                        same setup or add-statements pages open in the browser
-    run --web           the browser pages instead of the app window (also the default after install --web)
-    run --setup         the full setup page again, in the browser (in the app: the Settings button)
+                        same app opens in the browser (welcome.py), and stops a few minutes after its tab is closed
+    run --web           the app in the browser instead of the window (also the default after install --web)
+    run --setup         only the full setup page, in the browser (in the app: the Settings button)
     run --app           the app, also with nobody at the terminal (what the launcher runs)
     run --rebuild       no browser: rebuild from the PDFs already in Statement/ (asks for a password in the terminal
                         if needed). Also what runs when nobody is at the terminal (a script)
@@ -392,14 +393,9 @@ def run_cmd(args):
         say("Updating the Python packages (requirements changed). This takes about a minute.")
         setup([f"--{mode}"], open_after=False)
         print()
-    if app and mode == "web" and not FROZEN:
-        sys.exit(
-            f"Installed without the app window. Run {cmd('install')} --app to add it (or {cmd('run')} for the browser)."
-        )
-
     ledger = os.path.join("workspace", "ledger.csv")
     # The app (launcher, or a person at the terminal): the dashboard, or the first-time setup with no ledger yet; it
-    # adds statements and changes settings itself. Exit 3 = no window possible here: the browser pages below instead.
+    # adds statements and changes settings itself. Exit 3 = no window possible here: the app in the browser below instead.
     if not (setup_page or rebuild or web or rest) and mode == "app" and (app or TTY_IN):
         py("build_dashboard", quiet=True)  # a pull may bring a newer page
         say("Opening the app")
@@ -415,21 +411,15 @@ def run_cmd(args):
         # 3 = app.py found no window possible (also how abort() ends on Windows); 134 = Qt aborted (Linux, macOS)
         if code not in (3, 134):
             return code
-        say("No app window here (see README); using the browser instead")
-        if app and os.path.exists(ledger):  # the launcher: just show the dashboard
-            import pathlib
-            import webbrowser
-
-            webbrowser.open(pathlib.Path("web", "dist", "index.html").resolve().as_uri())
-            return 0
-    if setup_page or not os.path.exists(ledger):
-        say("Opening the setup page (--setup)" if setup_page else "No ledger yet: opening the setup page")
+        say("No app window here (see README); opening the app in your browser instead")
+    if setup_page:
+        say("Opening the setup page (--setup)")
+        return py("welcome", "--setup")
+    # No app window: the same app in the browser, for a person (the launcher, the terminal) or with no ledger yet (its
+    # first-time setup); --rebuild, --password= or a script with no terminal rebuild here.
+    if not rebuild and not rest and (app or TTY_IN or not os.path.exists(ledger)):
+        say(f"Opening Statement Visualizer in your browser ({cmd('run')} --rebuild rebuilds without it)")
         return py("welcome")
-    # No app window: a person at the terminal gets the add-statements page; --rebuild, --password= or a script with no
-    # terminal rebuild here.
-    if not rebuild and not rest and TTY_IN:
-        say(f"Opening the page to add new statements ({cmd('run')} --rebuild skips it)")
-        return py("welcome", "--add")
 
     os.makedirs("Statement", exist_ok=True)
     if not any(n.lower().endswith(".pdf") for n in os.listdir("Statement")):
@@ -450,7 +440,7 @@ def run_cmd(args):
 
 
 def gmail(args):
-    """Option 2: download new statement PDFs from Gmail into Statement/, then rebuild the dashboard. Read-only Gmail
+    """Download new statement PDFs from Gmail into Statement/, then rebuild the dashboard. Read-only Gmail
     access; the first run opens a browser once to authorise (README has the Google setup). Options: --no-build (only
     download), --listen (keep running: fetch + build within seconds of new mail; README "Real time"). --listen has
     nobody to type PDF passwords: put KTB_PW / KBANK_PW in .env first, and run gmail once by hand to authorise."""
@@ -473,15 +463,19 @@ def clear(args):
     statement PDFs, the ledger and manual entries, the dashboard page (it holds your transactions inline), the statement
     cache, the saved Gmail login and "seen" list, your expected spending, and what the app window saved (labels,
     theme, size); resets the settings file to the blank template; rebuilds the blank dashboard. -y: don't ask
-    (--all is accepted and means the same). Not removed: the app (uninstall) and the access you gave Google (revoke it
-    at https://myaccount.google.com/permissions). Labels saved in a browser live in that browser."""
-    yes = False
+    (--all is accepted and means the same). --in-app: run by the open app (Settings, welcome.py's wipe), whose own
+    storage (workspace/.app/) is in use: kept, except the Gmail log; the page clears what it saved there itself. Not
+    removed: the app (uninstall) and the access you gave Google (revoke it at https://myaccount.google.com/permissions).
+    Labels saved in a browser live in that browser."""
+    yes = in_app = False
     for a in args:
         if a == "-y":
             yes = True
+        elif a == "--in-app":
+            in_app = True
         elif a != "--all":
             sys.exit(f"usage: {cmd('clear')} [-y]")
-    data = data_files()
+    data = data_files(in_app)
     print(f"In {ROOT}, will delete:")
     print("\n".join(f"  {p}" for p in data) if data else "  (no data files found)")
     print("Will reset to the blank template: your settings file (passwords, Google client id/secret, name, theme)")
@@ -509,9 +503,10 @@ def clear(args):
     return 0
 
 
-def data_files():
+def data_files(in_app=False):
     """Your data, by name (never a whole folder of yours): statement PDFs, the ledger and the other files the scripts
-    write, and the dashboard page, which holds your transactions inline. Those that exist."""
+    write, and the dashboard page, which holds your transactions inline. Those that exist. in_app: the app's own
+    storage (.app) is in use, so only the Gmail log in it."""
     data = (
         [os.path.join("Statement", n) for n in sorted(os.listdir("Statement")) if n.lower().endswith(".pdf")]
         if os.path.isdir("Statement")
@@ -526,7 +521,15 @@ def data_files():
         p
         for p in (
             os.path.join("workspace", n)
-            for n in ("expected.json", "token.json", "credentials.json", ".gmail_seen.json", ".cache", ".app")
+            for n in (
+                "expected.json",
+                "token.json",
+                "credentials.json",
+                ".gmail_seen.json",
+                ".gmail_seen.json.tmp",
+                ".cache",
+                os.path.join(".app", "gmail-listen.log") if in_app else ".app",
+            )
         )
         if os.path.exists(p)
     ]

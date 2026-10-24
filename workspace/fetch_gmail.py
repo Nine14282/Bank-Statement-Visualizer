@@ -42,7 +42,8 @@ TOPIC = (os.environ.get("GMAIL_TOPIC") or "").rsplit("/", 1)[-1]  # also accepts
 SUBSCRIPTION = (os.environ.get("GMAIL_SUBSCRIPTION") or "").rsplit("/", 1)[-1]
 PROJECT = os.environ.get("GOOGLE_PROJECT_ID") or ""
 # The listener only searches recent mail (Gmail query syntax): each wake-up is cheap, and it never re-walks years of
-# history. Older mail (listener off for longer) comes in with a plain ./gmail.sh, which searches everything.
+# history. Older mail (listener off for longer) comes in with a plain fetch (Fetch from Gmail, ./gmail.sh), which
+# searches everything.
 LISTEN_WINDOW = "newer_than:7d"
 UPDATED = "Dashboard updated."  # printed after a rebuild; the same text in app.py
 RECENT = ""  # added to every search; --recent (the listener's per-email fetch) sets it
@@ -111,7 +112,7 @@ def service(interactive=False):
         if not creds or not creds.valid:
             if not (interactive or sys.stdin.isatty()):  # the listener: nobody to click through the browser
                 sys.exit(
-                    f"Gmail login missing or expired: run {config.command('gmail')} by hand once to sign in again."
+                    "Gmail login missing or expired: sign in again with Fetch from Gmail (Add statements in the app)."
                 )
             flow = InstalledAppFlow.from_client_config(client_config(), SCOPES)
             creds = flow.run_local_server(port=0)
@@ -272,8 +273,11 @@ def pull(interactive=False):
 
 
 def save_seen(seen):
-    with open(SEEN, "w") as f:
+    """Written whole, then renamed over: the app ends a fetch at once on Windows when it closes (no SIGTERM there),
+    and a half-written list would stop every later fetch."""
+    with open(SEEN + ".tmp", "w") as f:
         json.dump(sorted(seen), f)
+    os.replace(SEEN + ".tmp", SEEN)
 
 
 def run(build):
@@ -376,7 +380,7 @@ def listen(build):
                 time.sleep(5)
             wait = 5
         except RefreshError:
-            sys.exit(f"Gmail login missing or expired: run {config.command('gmail')} by hand once to sign in again.")
+            sys.exit("Gmail login missing or expired: sign in again with Fetch from Gmail (Add statements in the app).")
         except (requests.RequestException, TransportError) as e:  # TransportError: the login refresh, offline
             code = getattr(getattr(e, "response", None), "status_code", None)
             if code in (400, 401, 403, 404):  # wrong name, missing permission or scope: retrying won't help
@@ -404,7 +408,7 @@ def main() -> int:
 LISTEN_HELP = """\
 Real-time Gmail (--listen) needs GMAIL_TOPIC, GMAIL_SUBSCRIPTION and GOOGLE_PROJECT_ID in .env, a Pub/Sub topic
 that gmail-api-push@system.gserviceaccount.com may publish to, a pull subscription on it, and the Pub/Sub scope
-on the OAuth consent screen. See README "Real time: Gmail push (optional)" for the one-time steps.
+on the OAuth consent screen. See README "Real time (optional)" for the one-time steps.
 """
 
 

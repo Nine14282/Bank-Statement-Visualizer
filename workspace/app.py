@@ -7,11 +7,12 @@ packages, nothing from apt), on macOS in the system's WebKit, on Windows in WebV
 the .exe build's window). The page's own saved settings (labels, expected spending, theme, seen rows) live in
 workspace/.app/ on Linux and Windows, apart from any browser's (macOS keeps them in WebKit's default store: pywebview
 ignores storage_path there).
-New mail updates the open window by itself: this starts the Gmail listener and, when it reports a rebuild, tells the
-page to swap the new data in (no polling, no reload). Add statements opens the add page right in
-the window (Api below). The window has almost no animation (?app, see
+New mail updates the open window by itself: this checks Gmail at start (or runs the real-time listener) and, when it
+reports a rebuild, tells the page to swap the new data in (no polling, no reload). Add statements and Settings open right in the
+window (Api below). The window has almost no animation (?app, see
 DESIGN.md "Desktop app window"); only new rows slide in. No web view (PyQt6 missing, an X11 desktop without
-libxcb-cursor0, or Windows without the WebView2 runtime)? Exits with 3 and run.sh opens the browser pages instead.
+libxcb-cursor0, or Windows without the WebView2 runtime)? Exits with 3 and run.sh opens the same app in the browser
+(welcome.py) instead.
 Usage: python app.py
 """
 
@@ -31,6 +32,7 @@ STORE = os.path.join(config.WORK, ".app")  # the window's browser storage (Linux
 WEBKIT_STORE = os.path.join(STORE, "localstorage", "file__0.localstorage")
 
 
+RAISE = os.path.join(STORE, "raise")  # a second launch asks the open app to come to the front (only_window)
 WINDOW = os.path.join(STORE, "window.json")  # the window's size and maximized state, kept between runs
 THEME_MODE = os.path.join(STORE, "theme")  # light or dark: what the page showed last (Api.theme)
 
@@ -61,8 +63,8 @@ def our_page() -> bool:
 
 
 class Api:
-    """The add-statements page in this window (Add statements → ?app&setup&add) calls window.pywebview.api.call()
-    instead of welcome.py's server: same handlers, no port, no login link. PDFs arrive base64-encoded."""
+    """Add statements and Settings in this window (App.tsx opens the wizard over the dashboard) call
+    window.pywebview.api.call() instead of welcome.py's server: same handlers, no port, no login link. PDFs arrive base64-encoded."""
 
     def save(self, name: str, text: str) -> bool:
         """Export CSV (shell.tsx): the page's own download doesn't work in the window (pywebview leaves downloads off),
@@ -97,6 +99,10 @@ class Api:
             return dict(welcome.PROGRESS)  # no LOCK: finish holds it while the build runs
         if not our_page():
             return {"error": "This page can't change your statements."}
+        import webview
+
+        if path == "/api/clear":
+            stop_gmail(wait=True)  # its log is part of what gets deleted (and Windows won't delete a file open in it)
         try:
             body = base64.b64decode(data or "") if path == "/api/upload" else json.dumps(data or {}).encode()
             if len(body) > welcome.MAX_PDF:
@@ -106,7 +112,14 @@ class Api:
                 out = welcome.handle(path, name or "statement.pdf", body)
         except ValueError as e:  # bad input, as the HTTP server answers 400
             return {"error": str(e)}
-        return out if out is not None else {"error": f"Unknown request {path}."}
+        if out is None:
+            return {"error": f"Unknown request {path}."}
+        if path in ("/api/gmail", "/api/google") and os.environ.get("GMAIL_TOPIC"):
+            start_gmail(webview.windows[0])  # real time just set up, or signed in with its permission now
+        if path == "/api/clear" and out.get("ok"):
+            # the page clears its own storage and says goodbye first; the next start is a fresh setup
+            threading.Timer(2, webview.windows[0].destroy).start()
+        return out
 
 
 def no_window_reason() -> str | None:
@@ -182,18 +195,33 @@ def move_webkit_storage(window) -> None:
         window.evaluate_js("location.reload()")
 
 
-def start_listener(window):
-    """Real-time Gmail while the window is open (README "Real time"): with GMAIL_TOPIC set, fetch_gmail.py --listen runs
-    in the background. Its output (senders, amounts) goes to workspace/.app/gmail-listen.log, private and git-ignored,
-    through a pipe read here: a "Dashboard updated." line (fetch_gmail.UPDATED) makes the page load the new data at once.
+GMAIL: dict = {"proc": None}  # the Gmail fetch or listener this window started
+
+
+def start_gmail(window) -> None:
+    """Gmail while the window is open. With GMAIL_TOPIC set (README "Real time"), fetch_gmail.py --listen runs in the
+    background; else, once signed in to Gmail (token.json, from Fetch from Gmail), one fetch at start brings in what
+    arrived while the app was closed. Their output (senders, amounts) goes to workspace/.app/gmail-listen.log, private
+    and git-ignored, through a pipe read here: a "Dashboard updated." line (fetch_gmail.UPDATED) makes the page load the
+    new data at once. Does nothing while one still runs.
     ponytail: the log only grows, a few lines per email; rotate it once it passes about 1 MB."""
-    if not os.environ.get("GMAIL_TOPIC"):
-        return None
+    if GMAIL["proc"] and GMAIL["proc"].poll() is None:
+        return
+    if os.environ.get("GMAIL_TOPIC"):
+        args: tuple = ("--listen",)
+    elif (
+        os.environ.get("GOOGLE_CLIENT_ID")
+        and os.environ.get("GOOGLE_CLIENT_SECRET")
+        and os.path.exists(os.path.join(config.WORK, "token.json"))
+    ):
+        args = ()
+    else:
+        return
     import subprocess
 
     os.makedirs(STORE, exist_ok=True)
-    listener = subprocess.Popen(
-        config.script("fetch_gmail", "--listen"),
+    listener = GMAIL["proc"] = subprocess.Popen(
+        config.script("fetch_gmail", *args),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -213,21 +241,59 @@ def start_listener(window):
                         window.evaluate_js("window.__ledgerUpdate && window.__ledgerUpdate()")
 
     threading.Thread(target=relay, daemon=True).start()
-    return listener
 
 
-def only_window():
-    """One app window at a time: a second one would share the first's browser storage (workspace/.app/), get no live
-    updates (one Gmail listener runs) and could build at the same time. Returns the lock, held while this process
-    runs, or None when another window has it. ponytail: no raising the open window (Wayland won't let an app take
-    focus anyway); the second launch just says so. Windows allows it: raise it there (FindWindowW, ShowWindow,
-    SetForegroundWindow) before the Windows app window's first release."""
+def stop_gmail(wait: bool = False) -> None:
+    """Linux, macOS: it finishes a fetch or rebuild in progress, then stops by itself; Windows ends it at once.
+    wait: until it has (at most 30 s), e.g. before its files are deleted."""
+    if GMAIL["proc"]:
+        GMAIL["proc"].terminate()
+        if wait:
+            with contextlib.suppress(Exception):
+                GMAIL["proc"].wait(30)
+
+
+def only_window(on_raise):
+    """One app at a time, the window or the app in the browser (welcome.py): a second one would share the first's storage
+    (workspace/.app/), get no live updates (one Gmail listener runs) and could build at the same time. Returns the lock,
+    held while this process runs; on_raise() then runs whenever a later launch asks for the app. None when another one
+    has it: that one is asked to come to the front instead, and the caller just exits."""
     os.makedirs(STORE, exist_ok=True)
-    lock = open(os.path.join(STORE, "window.lock"), "w")
+    lock = open(os.path.join(STORE, "window.lock"), "a")  # not "w": Windows won't truncate a file another one locked
     if config.lock(lock, wait=False):
+        with contextlib.suppress(OSError):
+            os.remove(RAISE)  # a request left from before
+        threading.Thread(target=watch_raise, args=(on_raise,), daemon=True).start()
         return lock
     lock.close()
+    if os.name == "nt":
+        import ctypes
+
+        # This launch is the user's click, so it may hand the foreground on: the open app can come to the front.
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+    open(RAISE, "w").close()
     return None
+
+
+def watch_raise(on_raise) -> None:
+    """ponytail: looks for a raise request once a second; a local socket if this ever shows up in a profile."""
+    import time
+
+    while True:
+        time.sleep(1)
+        if os.path.exists(RAISE):
+            with contextlib.suppress(OSError):
+                os.remove(RAISE)
+            with contextlib.suppress(Exception):  # e.g. the window is closing
+                on_raise()
+
+
+def bring_forward(w, shown: dict) -> None:
+    """The open window to the front: un-minimized (restore() only then: it would also un-maximize), shown and
+    activated (pywebview: Qt raises and activates; Windows shows and activates)."""
+    if shown["minimized"]:
+        w.restore()
+    w.show()
 
 
 def window_state() -> dict:
@@ -267,9 +333,11 @@ def keep_window_state(w, state: dict) -> None:
 def main() -> int:
     url = PAGE.as_uri()
     linux = sys.platform.startswith("linux")
-    lock = only_window()  # held until main() returns
+    window: dict = {}  # filled in once the window exists; a raise request before that is ignored
+    shown = {"minimized": False}
+    lock = only_window(lambda: bring_forward(window["w"], shown))  # held until main() returns
     if not lock:
-        print("Statement Visualizer is already open.", file=sys.stderr)
+        print("Statement Visualizer is already open: it was asked to come to the front.", file=sys.stderr)
         return 0
     try:
         if linux:
@@ -309,32 +377,34 @@ def main() -> int:
             text_select=True,
             zoomable=True,
         )  # select + Ctrl+C, and Ctrl+wheel zoom, as in a tab
+        window["w"] = w
+        w.events.minimized += lambda: shown.update(minimized=True)
+        w.events.restored += lambda: shown.update(minimized=False)
+        w.events.maximized += lambda: shown.update(minimized=False)
         if linux:
             keep_window_state(w, state)
             w.events.before_show += lambda window: prepare_page(window, bg)
             w.events.loaded += move_webkit_storage
         w.events.shown += lambda: show_console(False)
-        listeners = []
         try:
-            # The listener starts once the GUI is up (webview.start's func): Qt aborts the process when it can't open a
+            # Gmail starts once the GUI is up (webview.start's func): Qt aborts the process when it can't open a
             # window, and a listener started before that would be left running with nobody to stop it.
             # Never ship debug=True, settings["REMOTE_DEBUGGING_PORT"] or http_server=True here: each opens a local
             # port (or the "Save page" menu) through which any program on this computer could read the whole ledger
             # in the page and drive Api (save passwords, add statements). Links to other sites need target="_blank":
             # a page opened in this window gets Api too (our_page() refuses it).
             webview.start(
-                lambda: listeners.append(start_listener(w)),
+                lambda: start_gmail(w),
                 gui="qt" if linux else None,
                 private_mode=False,
                 storage_path=STORE,
             )
         finally:
-            for listener in filter(None, listeners):
-                listener.terminate()  # it finishes a fetch or rebuild in progress, then stops by itself
+            stop_gmail()
     except Exception as e:  # ImportError, or pywebview finding no GUI toolkit
         show_console(True)
         print(f"No app window ({type(e).__name__}: {e}).", file=sys.stderr)
-        return 3  # run.sh: use the browser pages instead
+        return 3  # run.sh: the app in the browser instead
     return 0
 
 

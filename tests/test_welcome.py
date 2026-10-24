@@ -1,6 +1,6 @@
 """welcome.py: names and the spending list are cleaned before use; the gates in front of handle(); uploads never
 overwrite and only this setup's files can be removed; a password is saved only after it opened every locked file,
-replacing the old line."""
+replacing the old line; Gmail settings are checked before saving; deleting everything needs DELETE typed."""
 
 import http.client
 import os
@@ -213,3 +213,82 @@ def test_failed_password_is_not_saved(monkeypatch, capsys):
     with open(config.ENVFILE, encoding="utf-8") as f:
         assert "KTB_PW=new\n" in f.read()
     assert os.environ["KTB_PW"] == "x"
+
+
+# --- the browser app: its link lands on ?web, and the page's ping is answered (it keeps the server from stopping) ---
+
+
+def test_link_opens_the_browser_app(web):
+    assert web("GET", f"/?setup={welcome.TOKEN}").getheader("Location") == "/?web"
+
+
+def test_ping_needs_the_cookie(web, cookie):
+    assert web("GET", "/api/ping").status == 404
+    assert web("GET", "/api/ping", cookie).status == 204
+
+
+# --- Gmail settings (Settings, last step): checked before saving; a blank secret keeps the saved one; real time needs
+# all three of its fields ---
+
+ID = "123-abc.apps.googleusercontent.com"
+
+
+@pytest.fixture
+def google_env(monkeypatch):
+    for k in welcome.GOOGLE.values():
+        monkeypatch.setenv(k, "")  # config.save() writes os.environ: this puts it back after the test
+
+
+def env_file() -> str:
+    with open(config.ENVFILE, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_google_saves_the_keys(google_env, capsys):
+    welcome.google({"id": ID, "secret": "GOCSPX-secret_1"})
+    assert f"GOOGLE_CLIENT_ID={ID}\n" in env_file()
+    assert "GOOGLE_CLIENT_SECRET=GOCSPX-secret_1\n" in env_file()
+    assert welcome.state()["google"]["secret"] is True  # the page learns only that it is saved
+
+
+def test_google_blank_secret_keeps_the_saved_one(google_env, capsys):
+    welcome.google({"id": ID, "secret": "GOCSPX-secret_1"})
+    welcome.google({"id": ID, "secret": ""})
+    assert "GOOGLE_CLIENT_SECRET=GOCSPX-secret_1\n" in env_file()
+
+
+def test_google_needs_a_secret_the_first_time(google_env):
+    with pytest.raises(ValueError):
+        welcome.google({"id": ID})
+
+
+def test_google_rejects_a_malformed_id(google_env):
+    with pytest.raises(ValueError):
+        welcome.google({"id": "not an id", "secret": "GOCSPX-secret_1"})
+    assert not os.path.exists(config.ENVFILE)
+
+
+def test_google_real_time_needs_all_three(google_env):
+    with pytest.raises(ValueError):
+        welcome.google({"id": ID, "secret": "GOCSPX-secret_1", "topic": "gmail-push"})
+
+
+def test_google_accepts_the_consoles_full_topic_path(google_env, capsys):
+    welcome.google(
+        {
+            "id": ID,
+            "secret": "GOCSPX-secret_1",
+            "project": "my-project",
+            "topic": "projects/my-project/topics/gmail-push",
+            "subscription": "gmail-sub",
+        }
+    )
+    assert "GMAIL_TOPIC=projects/my-project/topics/gmail-push\n" in env_file()
+
+
+# --- Delete all my data: only with the typed confirmation ---
+
+
+def test_clear_needs_delete_typed():
+    with pytest.raises(ValueError):  # refused before anything runs
+        welcome.handle("/api/clear", "", b'{"confirm": "delete"}')

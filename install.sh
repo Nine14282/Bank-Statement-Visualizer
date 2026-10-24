@@ -3,7 +3,7 @@
 #
 #   ./install.sh          the app window (default; keeps the mode of an existing install)
 #   ./install.sh --app    the app window: also installs pywebview, adds the app-menu entry / launcher
-#   ./install.sh --web    browser only: no pywebview, no launcher; ./run.sh opens the pages in your browser
+#   ./install.sh --web    browser only: no pywebview; the app-menu entry / launcher opens the app in your browser
 #
 # Sets up the Python environment and your private settings, and adds the app-menu entry (Linux) or the launcher file
 # (macOS). Nothing opens: use the app when you want to, from your app menu or with ./run.sh. Everything after that

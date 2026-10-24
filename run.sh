@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Option 1 (manual): statement PDFs -> ledger.csv -> web/dist/index.html
+# Statement PDFs -> ledger.csv -> web/dist/index.html
 #
 #   ./run.sh                      opens the app: its own window with the dashboard, Add statements and Settings, or
 #                                 the first-time setup when there's no ledger yet (statements, passwords, theme,
 #                                 expected spending). Installs what's missing first. No window possible here (no
-#                                 Qt web view)? The same setup or add-statements pages open in the browser
-#   ./run.sh --web                the browser pages instead of the app window (also the default after ./install.sh --web)
-#   ./run.sh --setup              the full setup page again, in the browser (in the app: the Settings button)
+#                                 Qt web view)? The same app opens in the browser, and stops a few minutes after
+#                                 its tab is closed
+#   ./run.sh --web                the app in the browser instead of the window (also the default after ./install.sh --web)
+#   ./run.sh --setup              only the full setup page, in the browser (in the app: the Settings button)
 #   ./run.sh --app                the app, also with nobody at the terminal (what the launcher from ./setup.sh runs)
 #   ./run.sh --rebuild            no browser: rebuild from the PDFs already in Statement/ (asks for a password
 #                                 in the terminal if needed). Also what runs when nobody is at the terminal (a script)

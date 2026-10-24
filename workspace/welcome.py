@@ -1,27 +1,35 @@
 #!/usr/bin/env python3
-"""Setup wizard and "add statements" page. ./run.sh starts the full setup on the first run (no ledger yet) or
-with --setup, and the short add page (--add: statements, passwords, update) on every later run. The app window
-(app.py) shows the same add page and calls handle() below directly, without this server.
+"""The app in the browser, for when no app window is possible here (app.py exits with 3), and the full setup page.
+run.sh / the launcher start it; the app window (app.py) calls handle() below directly, without this server.
 
-A small local server serves the dashboard page with ?setup (plus &add in add mode), which shows the wizard
-instead of the dashboard (web/src/components/setup/wizard.tsx), and answers its API calls:
+  python welcome.py          the browser app: the dashboard, with Add statements and Settings working in the page
+                             (the first-time setup when there is no ledger yet). Stops by itself a few minutes after
+                             the page is gone (IDLE)
+  python welcome.py --setup  only the full setup page (run --setup); stops once it has built the dashboard
 
-  GET  /api/state            banks, statements in Statement/, the current theme and expected spending
+A small local server serves the dashboard page (?web for the app, ?setup for the setup page; the React app shows
+the wizard or the dashboard from that, web/src/components/setup/wizard.tsx) and answers its API calls:
+
+  GET  /api/state            banks, statements in Statement/, the current theme and expected spending, Gmail settings
+  GET  /api/ping             the open page says it is still there (every 30 s)
   POST /api/upload?name=X    body = one PDF: saved into Statement/, its bank detected
   POST /api/remove           {name}: delete a file uploaded in this session (never an older one)
   POST /api/bank             {name, bank}: the user says which bank a file is from
   POST /api/gmail            download new statements (and payment notices) from Gmail into Statement/; the first
                              time it opens Google's sign-in in the browser. Offered only when the Google keys are set
+  POST /api/google           {id, secret, project, topic, subscription}: the Gmail settings, into the settings file
   POST /api/password         {bank, password, remember}: opens and parses that bank's locked files with it
-  POST /api/finish           {theme, plan}: save the choices (each only if sent), build the ledger + dashboard,
-                             open it, stop
+  POST /api/folder           open the data folder (Statement/, workspace/) in the file manager
+  POST /api/clear            {confirm: "DELETE"}: delete all your data (launcher.py clear), then this app closes
+  POST /api/finish           {theme, plan}: save the choices (each only if sent), build the ledger + dashboard; the
+                             setup page then opens it and stops
   GET  /api/progress         what the build is doing ({stage, done, total}), polled by the page while it runs
 
-Only this computer can reach it (127.0.0.1, random port). The printed link carries a random one-time token: the
+Only this computer can reach it (127.0.0.1, port PORT). The printed link carries a random one-time token: the
 first visit swaps it for an HttpOnly, SameSite=Strict cookie and redirects to a clean URL, so a copy of the link
 (e.g. read from the browser's command line in `ps` by another user of this computer) is already spent. Every
 later request needs that cookie plus an X-Setup header other sites can't send. Passwords are kept in memory unless
-"remember" saves them to the settings file. Usage: python welcome.py [--add]
+"remember" saves them to the settings file. Usage: python welcome.py [--setup]
 """
 
 import contextlib
@@ -33,6 +41,7 @@ import secrets
 import socket
 import sys
 import threading
+import time
 import webbrowser
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -60,8 +69,12 @@ def note(msg: str) -> None:
 
 
 STATEMENTS = os.path.join(config.ROOT, "Statement")
-ADD = "--add" in sys.argv[1:]  # the short "add statements" page, not the full setup
-AGAIN = config.command("run") + ("" if ADD else " --setup")  # what gives a fresh page
+SETUP = "--setup" in sys.argv[1:]  # only the full setup page, not the browser app
+# Fixed, so the page keeps one address: a browser keeps what the page saves (labels, expected spending, theme) per
+# address, port included. Taken by something else: any free port, and that run's page starts from the defaults.
+PORT = 47613
+IDLE = 180  # seconds without a word from the page, then the server stops (a hidden tab's timers slow to once a minute)
+LAST = [time.monotonic()]  # when the page last asked anything
 TOKEN = secrets.token_urlsafe(24)  # one-time: in the printed link, good for the first visit only
 SESSION = secrets.token_urlsafe(32)  # the cookie that visit gets; never printed or put in a URL
 TOKEN_USED = threading.Event()
@@ -119,6 +132,9 @@ def state() -> dict:
         "files": [{"name": n, **f} for n, f in FILES.items()],
         "theme": os.environ.get("THEME", ""),
         "gmail": bool(os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")),
+        # the Gmail settings for their form: the secret only as "saved or not"
+        "google": {k: bool(os.environ.get(v)) if k == "secret" else os.environ.get(v, "") for k, v in GOOGLE.items()},
+        "folder": config.ROOT,
         "plan": plan,
     }
 
@@ -159,6 +175,78 @@ def gmail() -> dict:
         FILES[os.path.basename(path)]["uploaded"] = True
     note(f"{len(got)} new statement(s), {notices} payment notice(s)")
     return {"files": len(got), "notices": notices}
+
+
+# The Gmail settings the page can set (Settings, last step): its field -> the setting's name, and what each must look
+# like (Google Cloud console values; a topic or subscription also as its full path, as the console copies it).
+GOOGLE = {
+    "id": "GOOGLE_CLIENT_ID",
+    "secret": "GOOGLE_CLIENT_SECRET",
+    "project": "GOOGLE_PROJECT_ID",
+    "topic": "GMAIL_TOPIC",
+    "subscription": "GMAIL_SUBSCRIPTION",
+}
+_NAME = r"[A-Za-z][\w.~+%-]{2,254}"
+_PROJECT = r"[a-z][a-z0-9-]{4,29}"
+GOOGLE_FORMAT = {
+    "id": (r"[\w.-]+\.apps\.googleusercontent\.com", "client ID"),
+    "secret": (r"[\w-]{10,100}", "client secret"),
+    "project": (_PROJECT, "project ID"),
+    "topic": (rf"(projects/{_PROJECT}/topics/)?{_NAME}", "topic"),
+    "subscription": (rf"(projects/{_PROJECT}/subscriptions/)?{_NAME}", "subscription"),
+}
+
+
+def google(data: dict) -> dict:
+    """Save the Gmail settings. A blank secret keeps the saved one; blank real-time fields turn real time off."""
+    got = {k: str(data.get(k) or "").strip() for k in GOOGLE}
+    for k, v in got.items():
+        pattern, label = GOOGLE_FORMAT[k]
+        if v and not re.fullmatch(pattern, v):
+            raise ValueError(f"That {label} doesn't look right: copy it again from the Google Cloud console.")
+    if not got["id"] or not (got["secret"] or os.environ.get(GOOGLE["secret"])):
+        raise ValueError("Paste both the client ID and the client secret.")
+    if any(got[k] for k in ("topic", "subscription")) and not all(got[k] for k in ("project", "topic", "subscription")):
+        raise ValueError("Real time needs the project ID, the topic and the subscription.")
+    for k, v in got.items():
+        if v or k != "secret":
+            config.save(GOOGLE[k], v)
+    sys.modules.pop("fetch_gmail", None)  # it reads these when imported: the next Gmail fetch imports it afresh
+    note("Gmail settings saved" + (" (real time on)" if got["topic"] else ""))
+    return {"ok": True}
+
+
+def show_folder() -> dict:
+    """The data folder in the file manager: Statement/ (the PDFs), workspace/ (the ledger), the settings file."""
+    if os.name == "nt":
+        os.startfile(config.ROOT)  # noqa: S606  # our own folder, nothing from the page
+    else:
+        import subprocess
+
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        subprocess.Popen([opener, config.ROOT], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+    return {"ok": True}
+
+
+def wipe(confirm: str) -> dict:
+    """Delete all your data with launcher.py's clear (the same list, by name), as a fresh install: PDFs, ledger,
+    settings file, Gmail login. The app's own storage (workspace/.app/) is in use, so it stays: the page clears what it
+    saved there itself, and this app closes afterwards (the window in app.py, the server in handle())."""
+    import subprocess
+
+    if confirm != "DELETE":
+        raise ValueError("Type DELETE to confirm.")
+    launcher = [sys.executable] if config.FROZEN else [sys.executable, os.path.join(config.HERE, "launcher.py")]
+    say("Deleting all your data…")
+    r = subprocess.run(  # noqa: S603
+        [*launcher, "clear", "-y", "--in-app"], capture_output=True, encoding="utf-8", errors="replace"
+    )
+    sys.stdout.write(r.stdout + r.stderr)
+    if r.returncode:
+        raise ValueError(f"Not everything could be deleted. {(r.stderr or r.stdout).strip()[-400:]}")
+    FILES.clear()
+    SAVED.clear()
+    return {"ok": True}
 
 
 def unlock(bank: str, password: str, remember: bool) -> dict:
@@ -242,7 +330,7 @@ def finish(server, theme: str, plan) -> dict:
     if code:
         say("The build stopped; the page shows why. Fix it there and press Try again.")
         return {"ok": False, "log": log[-3000:]}
-    if server is None:  # the app window (app.py) goes back to the dashboard itself
+    if server is None or not SETUP:  # the app (window or browser) goes back to the dashboard itself
         for f in FILES.values():  # its next add page lists only files added after this update
             f["uploaded"] = False
         say("Done. The dashboard is rebuilt.")
@@ -278,17 +366,26 @@ def handle(path: str, name: str, body: bytes, server=None) -> dict | None:
         return gmail()
     if path == "/api/password":
         return unlock(str(data.get("bank", "")), str(data.get("password", "")), bool(data.get("remember")))
+    if path == "/api/google":
+        return google(data)
+    if path == "/api/folder":
+        return show_folder()
+    if path == "/api/clear":
+        out = wipe(str(data.get("confirm", "")))
+        if server:  # the page says goodbye first (app.py closes the window itself)
+            threading.Timer(2, server.shutdown).start()
+        return out
     if path == "/api/finish":
         return finish(server, str(data.get("theme", "")), data.get("plan"))
     return None
 
 
 class Server(ThreadingHTTPServer):
-    """The page's server, its port for this program alone. http.server turns on SO_REUSEADDR, which on Windows lets
-    another program (another account's too) bind the same 127.0.0.1 port and take the one-time link's visit. A random
-    port (0) needs no reuse; Windows also gets SO_EXCLUSIVEADDRUSE."""
+    """The page's server, its port for this program alone. SO_REUSEADDR on Windows lets another program (another
+    account's too) bind the same 127.0.0.1 port and take the one-time link's visit: off there, and Windows gets
+    SO_EXCLUSIVEADDRUSE. Elsewhere it only lets PORT be bound again right after the last run closed it."""
 
-    allow_reuse_address = False
+    allow_reuse_address = os.name != "nt"
 
     def server_bind(self):
         if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
@@ -303,6 +400,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def allowed(self) -> bool:
+        LAST[0] = time.monotonic()  # the page is still there (IDLE)
         port = self.server.server_address[1]
         return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")  # no DNS rebinding
 
@@ -341,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                 TOKEN_USED.set()  # first visit: swap the link's token for a cookie, then drop it from the URL
                 self.send_response(303)
                 self.send_header("Set-Cookie", f"{self.cookie_name()}={SESSION}; HttpOnly; SameSite=Strict; Path=/")
-                self.send_header("Location", "/?setup&add" if ADD else "/?setup")
+                self.send_header("Location", "/?setup" if SETUP else "/?web")
                 self.send_header("Content-Length", "0")
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
@@ -349,13 +447,18 @@ class Handler(BaseHTTPRequestHandler):
             if self.signed_in():
                 return self.send(200, open(OUT, "rb").read(), "text/html; charset=utf-8")
             return self.send(
-                403, f"This link has already been used (or is wrong). Run {AGAIN} for a new one.".encode(), "text/plain"
+                403,
+                b"This link has already been used (or is wrong). Open Statement Visualizer again for a new one.",
+                "text/plain",
             )
         if url.path == "/api/state" and self.api_ok():
             with LOCK:
+                scan(quiet=True)  # statements dropped into Statement/ meanwhile (Open data folder), as in app.py
                 return self.json(state())
         if url.path == "/api/progress" and self.api_ok():
             return self.json(dict(PROGRESS))  # no LOCK: finish() holds it while the build runs
+        if url.path == "/api/ping" and self.api_ok():
+            return self.send(204, b"", "text/plain")  # allowed() noted the time
         self.send(404, b"not found", "text/plain")
 
     def do_POST(self):
@@ -370,6 +473,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(size)
         try:
             with LOCK:
+                scan(quiet=True)
                 out = handle(url.path, parse_qs(url.query).get("name", ["statement.pdf"])[0], body, self.server)
         except ValueError as e:
             return self.json({"error": str(e)}, 400)
@@ -378,23 +482,56 @@ class Handler(BaseHTTPRequestHandler):
         self.json(out)
 
 
+def make_server() -> Server:
+    try:
+        return Server(("127.0.0.1", PORT), Handler)
+    except OSError:  # taken
+        return Server(("127.0.0.1", 0), Handler)
+
+
+def stop_when_idle(server) -> None:
+    """The page pings every 30 s while it is open (main.tsx); a few minutes without a word, and it is gone."""
+    while time.monotonic() - LAST[0] < IDLE:
+        time.sleep(10)
+    say("The page has been closed for a few minutes: stopping. Open Statement Visualizer again to use it.")
+    server.shutdown()
+
+
+def link(server) -> str:
+    """A fresh one-time link: each opens the page once (a later launch of the app gets its own, see main)."""
+    global TOKEN
+    TOKEN = secrets.token_urlsafe(24)
+    TOKEN_USED.clear()
+    return f"http://127.0.0.1:{server.server_address[1]}/?setup={TOKEN}"
+
+
 def main() -> int:
-    page = "The add-statements page" if ADD else "The setup page"
-    say(f"Building {page.lower()} (it is part of the dashboard)")
+    import app  # its one-app-at-a-time lock and console helper; nothing that needs a web view
+
+    server = None
+    # Another launch while this runs (the app menu, the Start Menu): a new tab of this same page.
+    lock = app.only_window(lambda: server and webbrowser.open(link(server)))
+    if not lock:
+        print("Statement Visualizer is already open: it was asked to open its page again.")
+        return 0
+    page = "The setup page" if SETUP else "Statement Visualizer"
+    say("Building the page (it is part of the dashboard)")
     build()  # make sure web/dist/index.html (which holds the wizard) is current
     say("Looking at the statements already in Statement/")
     scan()
-    server = Server(("127.0.0.1", 0), Handler)
-    url = f"http://127.0.0.1:{server.server_address[1]}/?setup={TOKEN}"
+    server = make_server()
+    url = link(server)
     say(f"{page} is ready (this computer only). Opening it in your browser…")
     note(f"If it didn't open, go to: {url}")
-    note("Leave this window open while you use the page. What you do there is logged below. Ctrl+C quits.")
-    webbrowser.open(url)
+    note("What you do there is logged below. This stops by itself a few minutes after you close the page.")
+    threading.Thread(target=stop_when_idle, args=(server,), daemon=True).start()
+    if webbrowser.open(url):
+        app.show_console(False)  # Windows, a double-click: nothing to do in this window (only if the page did open)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print()
-        say(f"Closed before finishing. Run {AGAIN} to continue.")
+        say("Closed. Open Statement Visualizer again to continue.")
         return 0
     print(f"Dashboard: {OUT}")
     return 0

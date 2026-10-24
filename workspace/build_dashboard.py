@@ -109,7 +109,7 @@ def build(csv_path: str = CSV) -> None:
     ids = [r["ID"] for r in rows if r.get("ID")]
     if len(ids) != len(set(ids)):
         print(
-            f"  WARNING: {len(ids) - len(set(ids))} duplicate transaction ID(s) in ledger.csv; re-run {config.command('run')}"
+            f"  WARNING: {len(ids) - len(set(ids))} duplicate transaction ID(s) in ledger.csv; update again (Add statements, then Update)"
         )
 
     tx = [

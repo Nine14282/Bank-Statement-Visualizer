@@ -46,14 +46,6 @@ def script(name: str, *args: str) -> list[str]:
     return [sys.executable, os.path.join(HERE, name + ".py"), *args]
 
 
-def command(name: str) -> str:
-    """How to type one of the project's commands (run, gmail, ...): the .exe in the build, else ./run.sh (from source on
-    Windows: the launcher itself)."""
-    if FROZEN:  # .\ : PowerShell runs nothing from the current folder without it (cmd.exe accepts it too)
-        return f"{'.' + os.sep if os.name == 'nt' else './'}{os.path.basename(sys.executable)} {name}"
-    return rf"py workspace\launcher.py {name}" if os.name == "nt" else f"./{name}.sh"
-
-
 def load_env() -> None:
     if not os.path.exists(ENVFILE):
         return

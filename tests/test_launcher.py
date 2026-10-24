@@ -51,7 +51,7 @@ def test_setup_from_source_on_windows_defaults_to_web(launcher, calls, monkeypat
     monkeypatch.setattr(launcher, "WIN", True)
     launcher.setup([], open_after=False)
     assert ("install_packages", "web") in calls
-    assert "make_launcher" not in calls
+    assert "make_launcher" in calls  # from source the browser mode gets its launcher too (none on Windows)
 
 
 def test_setup_frozen_windows_app_installs_no_packages(launcher, calls, monkeypatch, capsys):
@@ -94,6 +94,54 @@ def test_setup_stops_when_the_dashboard_build_fails(launcher, calls, monkeypatch
     with pytest.raises(SystemExit):
         launcher.setup([], open_after=False)
     assert "make_launcher" not in calls
+
+
+# --- run: no app window here -> the same app in the browser (welcome.py) -------------------------------------------
+
+
+@pytest.fixture
+def run_calls(launcher, monkeypatch):
+    """run_cmd in the Windows build, the app window failing (exit 3); the scripts run, with their arguments."""
+    log = []
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher, "WIN", True)
+    monkeypatch.setattr(launcher, "TTY_IN", True)
+    monkeypatch.setattr(launcher, "prepare", lambda: None)
+    monkeypatch.setattr(launcher, "own_console", lambda: False)
+    monkeypatch.setattr(launcher, "py", lambda name, *a, **k: log.append((name, *a)) or (3 if name == "app" else 0))
+    return log
+
+
+def test_run_without_a_window_opens_the_app_in_the_browser(launcher, run_calls, capsys):
+    assert launcher.run_cmd([]) == 0
+    assert run_calls[-2:] == [("app",), ("welcome",)]
+
+
+def test_run_setup_opens_only_the_setup_page(launcher, run_calls, capsys):
+    launcher.run_cmd(["--setup"])
+    assert run_calls == [("welcome", "--setup")]
+
+
+def test_run_rebuild_with_no_terminal_never_opens_a_page(launcher, run_calls, monkeypatch, capsys):
+    monkeypatch.setattr(launcher, "TTY_IN", False)
+    os.makedirs("workspace", exist_ok=True)
+    open(os.path.join("workspace", "ledger.csv"), "w").close()
+    os.makedirs("Statement", exist_ok=True)
+    open(os.path.join("Statement", "a.pdf"), "w").close()
+    launcher.run_cmd([])
+    assert run_calls == [("update_statement",)]
+
+
+# --- clear --in-app (Settings > Delete all my data): the app's own storage is in use, only its Gmail log goes -----
+
+
+def test_data_files_in_app_keep_the_window_storage_but_not_the_gmail_log(launcher):
+    os.makedirs(os.path.join("workspace", ".app"))
+    open(os.path.join("workspace", ".app", "gmail-listen.log"), "w").close()
+    assert os.path.join("workspace", ".app") in launcher.data_files()
+    inside = launcher.data_files(in_app=True)
+    assert os.path.join("workspace", ".app") not in inside
+    assert os.path.join("workspace", ".app", "gmail-listen.log") in inside
 
 
 # --- --smoke -------------------------------------------------------------------------------------------------------

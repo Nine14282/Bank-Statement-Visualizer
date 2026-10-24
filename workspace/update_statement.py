@@ -167,10 +167,9 @@ def read_pdf(path):
     ):  # the Gmail listener / a script: nobody to ask. Stop rather than write a ledger missing this file.
         keys = " / ".join(b.passwords[0] for b in BANKS)
         sys.exit(
-            f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Set {keys} "
-            f"in the env settings (see .env.example), run {config.command('run')} --setup, or run this by hand to "
-            "type it. "
-            "Ledger left unchanged."
+            f"No known password opens {os.path.basename(path)} ({why(errors[-1])}). Type it on the Passwords step "
+            "(Add statements in the app) and tick Remember, so updates that run on their own can open it too "
+            f"(it is saved as {keys} in the settings file). Ledger left unchanged."
         )
     named = bank_from_name(path)
     last = None

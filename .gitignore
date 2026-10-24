@@ -10,7 +10,7 @@ Statement/
 .env
 workspace/token.json
 workspace/credentials.json
-workspace/.gmail_seen.json
+workspace/.gmail_seen.json*
 workspace/.gmail.lock
 workspace/.gmail-listen.lock
 

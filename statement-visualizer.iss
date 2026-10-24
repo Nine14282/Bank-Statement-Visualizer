@@ -43,7 +43,7 @@ RestartApplications=no
 ; failing on its locked files (an uninstall would otherwise leave them until a restart).
 AppMutex=StatementVisualizer
 ; Signing: CI has SignPath sign StatementVisualizer.exe before this script runs and Setup after it (README,
-; "Releasing the Windows program"). ponytail: the uninstaller (unins000.exe) stays unsigned, since SignPath's GitHub
+; "The Windows program", Releasing). ponytail: the uninstaller (unins000.exe) stays unsigned, since SignPath's GitHub
 ; action can't act as Inno's SignTool; it is made on the user's PC and never downloaded, so SmartScreen doesn't check
 ; it. Sign it too (SignedUninstaller=yes) if SignPath's command-line signing becomes an option.
 
@@ -69,7 +69,7 @@ Name: "{autodesktop}\Statement Visualizer"; Filename: "{app}\StatementVisualizer
 
 [Run]
 #if FileExists(AddBackslash(SourcePath) + "dist\MicrosoftEdgeWebview2Setup.exe")
-; Not elevated, it installs the runtime for this account only. Offline it fails quietly: the browser pages still work.
+; Not elevated, it installs the runtime for this account only. Offline it fails quietly: the app then opens in the browser.
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2 Runtime..."; Flags: waituntilterminated; Check: WebView2Missing
 #endif
 Filename: "{app}\StatementVisualizer.exe"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,Statement Visualizer}"; Flags: nowait postinstall skipifsilent
@@ -182,6 +182,7 @@ begin
   DeleteNamed(App + '\workspace\token.json', False);
   DeleteNamed(App + '\workspace\credentials.json', False);
   DeleteNamed(App + '\workspace\.gmail_seen.json', False);
+  DeleteNamed(App + '\workspace\.gmail_seen.json.tmp', False);
   DeleteNamed(App + '\workspace\.gmail.lock', False);
   DeleteNamed(App + '\workspace\.gmail-listen.lock', False);
   DeleteNamed(App + '\workspace\.cache', True);
