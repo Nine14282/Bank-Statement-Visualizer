@@ -1,25 +1,14 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import GlobalStyles from '@mui/material/GlobalStyles'
-import { StyledEngineProvider, ThemeProvider } from '@mui/material/styles'
-import { MotionConfig, MotionGlobalConfig } from 'motion/react'
+import { MotionConfig } from 'motion/react'
 import './index.css'
 import App from './App.tsx'
-import { theme } from '@/lib/mui-theme'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { META, setData } from '@/lib/ledger'
-import { initialTheme } from '@/lib/themes'
-import { APP, ARRIVE, WEB } from '@/lib/utils'
+import { applyTheme, initialTheme } from '@/lib/themes'
+import { WEB } from '@/lib/utils'
 
-const start = initialTheme()
-document.documentElement.dataset.theme = start.id   // before the first paint: no flash of the wrong theme
-// The desktop app window skips every Motion animation (chosen under WebKitGTK, the window's engine before Qt, which
-// stuttered on them: first scroll 24 slow frames -> 9). The browser keeps them. One exception: the dashboard's entrance
-// after an update (ARRIVE); then still again.
-if (APP) MotionGlobalConfig.skipAnimations = !ARRIVE
-if (ARRIVE) document.documentElement.classList.add('arriving')   // CSS animations play too (index.css); ends: App.tsx
-// The app window reports reduced motion because app.py asks its web view for it, not because the user asked:
-// the new-row animations (index.css .tx-new, tx-table.tsx) check this class to play there anyway.
-if (APP) document.documentElement.classList.add('in-app')
+applyTheme(initialTheme())   // before the first paint: no flash of the wrong theme
 // Served by welcome.py (the app in the browser, or the setup page): it stops by itself a few minutes after the page is
 // gone, so while it is open the page says so.
 if (WEB || new URLSearchParams(location.search).has('setup'))
@@ -36,20 +25,13 @@ for (const type of ['dragover', 'drop'] as const) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {/* enableCssLayer: MUI styles go in @layer mui, so Tailwind utilities override them. MUI's sheet lands first in
-        <head>, ahead of Tailwind's, so the layer order must be declared here, before any layer opens (MUI's Tailwind v4
-        guide). `properties` is Tailwind's own @property layer. */}
-    <StyledEngineProvider enableCssLayer>
-      <GlobalStyles styles="@layer properties, theme, base, mui, components, utilities;" />
-      {/* noSsr: the .dark class is set on the first render, not a render late. storageManager={null}: `ledger-theme`
-          (themes.ts) is the only place the theme is kept, MUI keeps no second copy (mui-mode) that could disagree. */}
-      <ThemeProvider theme={theme} defaultMode={start.mode} noSsr storageManager={null}>
-        {/* "user": animations shrink to fades when the OS asks for reduced motion (not in the entrance after an update) */}
-        <MotionConfig reducedMotion={ARRIVE ? 'never' : 'user'}>
-          <App />
-        </MotionConfig>
-      </ThemeProvider>
-    </StyledEngineProvider>
+    {/* delay: a tooltip shows 100 ms after the pointer arrives; moving on to the next one shows it at once */}
+    <TooltipProvider delay={100}>
+      {/* "user": animations shrink to fades when the OS asks for reduced motion */}
+      <MotionConfig reducedMotion="user">
+        <App />
+      </MotionConfig>
+    </TooltipProvider>
   </StrictMode>,
 )
 

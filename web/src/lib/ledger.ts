@@ -102,8 +102,9 @@ export function balanceNow(rows: Tx[]) {
 }
 
 export const round2 = (n: number) => Math.round(n * 100) / 100
-export const baht = (n: number) =>
-  '฿' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// One formatter for every amount: toLocaleString with options builds a new one per call (it showed up in profiles).
+const TWO_DP = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+export const baht = (n: number) => '฿' + TWO_DP.format(Math.abs(n))
 export const signed = (n: number) => (n < 0 ? '−' : '+') + baht(n)
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -296,4 +297,14 @@ export function toCsv(rows: Tx[]) {
   const body = rows.map((t) => [t.date, csvText(t.desc), csvText(t.label ?? ''), csvText(t.cat), t.amt.toFixed(2),
     t.bal == null ? '' : t.bal.toFixed(2), csvText(bankName(t.bank))].map(q).join(','))
   return '﻿' + [head.join(','), ...body].join('\n')
+}
+
+// Page buttons: the first, the last, and `near` pages each side of the current one; a gap becomes '…'.
+export function pageItems(page: number, count: number, near: number) {
+  const out: (number | '…')[] = []
+  for (let p = 1; p <= count; p++) {
+    if (p === 1 || p === count || Math.abs(p - page) <= near) out.push(p)
+    else if (out.at(-1) !== '…') out.push('…')
+  }
+  return out
 }

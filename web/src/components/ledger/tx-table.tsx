@@ -1,21 +1,20 @@
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import Pagination from '@mui/material/Pagination'
-import { ArrowDown, ArrowUp, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { LATE_NOTE, bankName, baht, descOf, lateNight, onData, signed, TX, useLedger, type Tx } from '@/lib/ledger'
-import { APP, cn } from '@/lib/utils'
+import { LATE_NOTE, bankName, baht, descOf, lateNight, onData, pageItems, signed, TX, useLedger, type Tx } from '@/lib/ledger'
+import { cn } from '@/lib/utils'
 import { TxDrawer } from '@/components/ledger/tx-drawer'
 
 // New-row highlight. The dashboard hot-reloads (main.tsx), so "new" = not in the set of rows the last page load saw.
 // Rows get a stable key (date|amount|desc, #n for repeats) that is also the React key. First visit highlights nothing.
 const SEEN = 'ledger-seen-rows'
 export const KEY = new Map<Tx, string>()
-let FRESH = new Set<string>()
+export let FRESH = new Set<string>()   // read live by Recent transactions (widgets.tsx)
 // Per dataset (page load, and each live swap): rows not seen before light up; a swap adds its rows to what's lit.
 const index = () => {
   KEY.clear()
@@ -74,8 +73,7 @@ function usePushDown(tx: Tx[]) {
   const last = useRef<{ tx: Tx[]; at: Map<string, number> }>({ tx, at: new Map() })
   useLayoutEffect(() => {
     const els = [...(document.getElementById('transactions')?.querySelectorAll<HTMLElement>('[data-k]') ?? [])]
-    // APP: the app window always reports reduced motion (app.py's speed setting, see main.tsx), so it doesn't count there
-    if (last.current.tx !== tx && (APP || !matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+    if (last.current.tx !== tx && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       for (const el of els) {
         const was = last.current.at.get(el.dataset.k!)
         const dy = was == null ? 0 : was - el.offsetTop
@@ -93,6 +91,37 @@ function usePushDown(tx: Tx[]) {
 }
 
 // Search term lives in App so the payee card's "Show" can set it.
+// Numbered pages under a list: "11–20 of 57", prev/next and page buttons (first, last, the ones near the current;
+// gaps become …). Nothing when it all fits on one page. Shared by the transactions table and the Custom tab.
+export function Pager({ label, page, per, total, onTurn }: { label: string; page: number; per: number; total: number; onTurn: (p: number) => void }) {
+  const desktop = useDesktop()
+  const pages = Math.ceil(total / per)
+  if (pages <= 1) return null
+  const from = (page - 1) * per
+  return (
+    <nav aria-label={label} className="flex flex-col items-center gap-2 pt-1 sm:flex-row sm:justify-between">
+      <span className="num text-xs text-muted-foreground">{from + 1}–{Math.min(from + per, total)} of {total}</span>
+      <div className="flex items-center gap-1 font-mono text-sm">
+        {[page - 1, ...pageItems(page, pages, desktop ? 1 : 0), page + 1].map((p, i, all) => {
+          const edge = i === 0 || i === all.length - 1
+          const btn = cn('grid place-items-center rounded-full transition hover:bg-muted disabled:pointer-events-none disabled:opacity-40', desktop ? 'size-8' : 'size-10')
+          if (p === '…') return <span key={`gap${i}`} aria-hidden className={cn(btn, 'text-muted-foreground')}>…</span>
+          if (edge) return (
+            <button key={i ? 'next' : 'prev'} type="button" disabled={p < 1 || p > pages} onClick={() => onTurn(p)}
+              aria-label={i ? 'Next page' : 'Previous page'} className={btn}>
+              {i ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
+            </button>
+          )
+          return (
+            <button key={p} type="button" onClick={() => onTurn(p)} aria-label={`Page ${p}`} aria-current={p === page ? 'page' : undefined}
+              className={cn(btn, p === page && 'bg-brand font-semibold text-white hover:bg-brand')}>{p}</button>
+          )
+        })}
+      </div>
+    </nav>
+  )
+}
+
 export function TxTable({ rows, caption, term, onTerm }: { rows: Tx[]; caption: string; term: string; onTerm: (t: string) => void }) {
   const desktop = useDesktop()
   const [sel, setSel] = useState<Tx | null>(null)
@@ -131,7 +160,6 @@ export function TxTable({ rows, caption, term, onTerm }: { rows: Tx[]; caption: 
     </TableHead>
   )
 
-  const pages = Math.ceil(shown.length / PAGE)
   const from = (page - 1) * PAGE
   const view = shown.slice(from, from + PAGE)
   // a new page starts at the top of the card, not wherever the pager was
@@ -233,16 +261,7 @@ export function TxTable({ rows, caption, term, onTerm }: { rows: Tx[]; caption: 
               </article>
             ))}
           </div>}
-          {pages > 1 && (
-            <nav aria-label="Transaction pages" className="flex flex-col items-center gap-2 pt-1 sm:flex-row sm:justify-between">
-              <span className="num text-xs text-muted-foreground">{from + 1}–{from + view.length} of {shown.length}</span>
-              <Pagination count={pages} page={page} onChange={(_, p) => turn(p)} shape="rounded" size={desktop ? 'medium' : 'large'}
-                siblingCount={desktop ? 1 : 0} boundaryCount={1}
-                sx={{ '& .MuiPaginationItem-root': { color: 'var(--foreground)', borderColor: 'var(--border)', fontFamily: 'var(--font-mono)', borderRadius: '9999px' },
-                  '& .MuiPaginationItem-root:hover': { bgcolor: 'var(--muted)' },
-                  '& .MuiPaginationItem-root.Mui-selected': { bgcolor: 'var(--brand)', color: '#fff', fontWeight: 600 } }} />
-            </nav>
-          )}
+          <Pager label="Transaction pages" page={page} per={PAGE} total={shown.length} onTurn={turn} />
         </CardContent>
         <TxDrawer tx={sel} onClose={() => setSel(null)} />
       </Card>

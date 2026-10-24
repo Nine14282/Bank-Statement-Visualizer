@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { CategoryCard } from '@/components/ledger/categories'
 import { CustomTab } from '@/components/ledger/custom'
@@ -15,7 +15,7 @@ import { TxTable } from '@/components/ledger/tx-table'
 import { MoneyMovement, MonthSpend, Overview, Payees, RecentTx, Segmented, WalletStack } from '@/components/ledger/widgets'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LAST, META, TX, YEARS, bankName, baht, daysBetween, firstName, summarize, useLedger, type Tx } from '@/lib/ledger'
-import { ARRIVE, ARRIVE_MS, EASE, HOSTED, OPEN_APP, cn, endArrival } from '@/lib/utils'
+import { EASE, HOSTED, OPEN_APP, cn } from '@/lib/utils'
 
 function Coverage() {
   const g = META.gaps
@@ -61,26 +61,26 @@ const hashTab = (): Tab => (location.hash === '#custom' ? 'custom' : location.ha
 function Ledger({ theme, onAdd, onSettings, inert }: {
   theme: ReturnType<typeof useTheme>; onAdd?: () => void; onSettings?: () => void; inert?: boolean
 }) {
-  // Back from an update (ARRIVE): this load plays the entrance (main.tsx) for ARRIVE_MS from now, when the dashboard is
-  // up; a later reload shouldn't replay it.
-  useEffect(() => {
-    if (!ARRIVE) return
-    history.replaceState(null, '', `${location.pathname}?app${location.hash}`)
-    const t = setTimeout(endArrival, ARRIVE_MS)
-    return () => clearTimeout(t)
-  }, [])
   const [tab, setTabState] = useState(hashTab)
   const [year, setYear] = useState('all')
   const [term, setTerm] = useState('')
   const [plan, setPlan] = usePlan()
   const tx = useLedger()   // a rebuild swaps the data in place (main.tsx): no reload, scroll and state kept
   const rows = useMemo(() => (year === 'all' ? tx : tx.filter((r) => r.date.startsWith(year))), [year, tx])
-  const setTab = (t: Tab) => {
-    if (t === tab) return
+  const [seen, setSeen] = useState(() => new Set([tab]))
+  // Stable (reads the tab from the hash), so the memoised Dashboard doesn't re-render on a tab change.
+  const setTab = useCallback((t: Tab) => {
+    if (t === hashTab()) return
     location.replace(t === 'dashboard' ? '#' : `#${t}`)
     setTabState(t)
+    setSeen((s) => (s.has(t) ? s : new Set(s).add(t)))
     scrollTo({ top: 0 })
-  }
+  }, [])
+  // A tab mounts on its first visit and then stays mounted. A tab not shown is skipped with content-visibility: the
+  // browser keeps its layout and React keeps its state and effects, so switching back redraws no chart and replays no
+  // fade-in. (React's <Activity> was tried: it re-runs effects on show, and Recharts re-renders every chart then.)
+  // my-0 cancels main's space-y gap for the hidden ones.
+  const pane = (t: Tab) => cn('space-y-10', t !== tab && '[content-visibility:hidden] my-0')
 
   return (
     <div className="relative min-h-svh overflow-x-clip" inert={inert}>
@@ -91,9 +91,11 @@ function Ledger({ theme, onAdd, onSettings, inert }: {
       <a href="#main" className="sr-only z-50 rounded-full bg-brand px-4 py-2 text-sm text-white focus:not-sr-only focus:fixed focus:top-3 focus:left-3">Skip to content</a>
       <TopBar rows={rows} year={year} tab={tab} onTab={setTab} theme={theme} onAdd={onAdd} onSettings={onSettings} />
       <main id="main" tabIndex={-1} className="relative mx-auto w-full max-w-[90rem] space-y-10 px-4 pb-28 sm:px-6 md:pb-14 md:pl-24 lg:pr-8">
-        {tab === 'dashboard' ? <Dashboard rows={rows} year={year} setYear={setYear} term={term} setTerm={setTerm} plan={plan} onPlan={() => setTab('plan')} />
-          : tab === 'plan' ? <PlanTab plan={plan} onPlan={setPlan} />
-          : <CustomTab />}
+        {seen.has('dashboard') && <div className={pane('dashboard')}>
+          <DashboardPage rows={rows} year={year} setYear={setYear} term={term} setTerm={setTerm} plan={plan} onTab={setTab} />
+        </div>}
+        {seen.has('plan') && <div className={pane('plan')}><PlanTab plan={plan} onPlan={setPlan} /></div>}
+        {seen.has('custom') && <div className={pane('custom')}><CustomTab /></div>}
         <p className="num pt-2 text-center text-xs text-muted-foreground">
           Built from Statement/ · {META.n} transactions · figures in Thai Baht (฿)
         </p>
@@ -115,10 +117,12 @@ const MoneyCard = memo(MoneyMovement)
 const CategoryList = memo(CategoryCard)
 const SpendRateCard = memo(SpendRate)
 const PredictCard = memo(Predict)
+const DashboardPage = memo(Dashboard)
 
-function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
-  rows: Tx[]; year: string; setYear: (y: string) => void; term: string; setTerm: (t: string) => void; plan: PlanItem[]; onPlan: () => void
+function Dashboard({ rows, year, setYear, term, setTerm, plan, onTab }: {
+  rows: Tx[]; year: string; setYear: (y: string) => void; term: string; setTerm: (t: string) => void; plan: PlanItem[]; onTab: (t: Tab) => void
 }) {
+  const onPlan = useCallback(() => onTab('plan'), [onTab])
   // The first paint is the top of the page (greeting, wallet, overview); the rest mounts right after it. Styling the
   // whole page up front kept the window blank for ~2 s in WebKitGTK.
   const later = useAfterPaint()
@@ -138,7 +142,7 @@ function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
             </p>
           </motion.div>
           <motion.div data-od-id="scope-filter" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.08, ease: EASE }}>
-            <Segmented id="year" big label="Filter by year" value={year} onChange={setYear}
+            <Segmented big label="Filter by year" value={year} onChange={setYear}
               options={[{ value: 'all', label: 'All years' }, ...YEARS.map((y) => ({ value: y, label: y }))]} />
           </motion.div>
         </div>
@@ -223,17 +227,17 @@ export default function App() {
     return () => { document.documentElement.style.overflow = '' }
   }, [panel])
 
-  if (SETUP) return <Wizard theme={theme} />
+  if (SETUP) return <Wizard />
   // No data yet: the app (window or ?web) runs the first-time setup itself; a page opened from disk can only say to
   // open the app.
-  if (!TX.length) return HOSTED ? <Wizard theme={theme} mode="setup" /> : <EmptyState />
+  if (!TX.length) return HOSTED ? <Wizard mode="setup" /> : <EmptyState />
   return (
     <>
       <Ledger theme={theme} inert={!!panel}
         onAdd={HOSTED ? () => setPanel('add') : undefined} onSettings={HOSTED ? () => setPanel('setup') : undefined} />
       {/* closed without an update of its own: catch up on any the listener pushed meanwhile (main.tsx); after the
           panel has left the page, which the update checks for */}
-      {panel && <Wizard theme={theme} mode={panel} onClose={() => { setPanel(null); setTimeout(() => (window as { __ledgerUpdate?: () => void }).__ledgerUpdate?.()) }} />}
+      {panel && <Wizard mode={panel} onClose={() => { setPanel(null); setTimeout(() => (window as { __ledgerUpdate?: () => void }).__ledgerUpdate?.()) }} />}
     </>
   )
 }

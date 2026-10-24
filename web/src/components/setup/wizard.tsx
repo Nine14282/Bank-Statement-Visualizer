@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { AnimatePresence, MotionConfig, MotionGlobalConfig, motion } from 'motion/react'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import {
   ArrowLeft, ArrowRight, Check, CircleAlert, Eye, EyeOff, FileText, FolderOpen, GitMerge, LayoutDashboard, Loader2, LockKeyhole,
   Mail, Plus, ShieldCheck, Sparkles, Trash2, Upload, type LucideIcon,
@@ -10,16 +10,15 @@ import { Input } from '@/components/ui/input'
 import { bankName } from '@/lib/banks'
 import { baht } from '@/lib/ledger'
 import { expectedFor, newId, type PlanItem } from '@/lib/plan'
-import { THEMES, type useTheme } from '@/lib/themes'
 import { APP, EASE, HOSTED, OPEN_APP, bridge, cn } from '@/lib/utils'
 
 // Setup: the app's first run (App.tsx, mode="setup", in the window or the browser app at ?web), Settings over the
 // dashboard (onClose: no Welcome screen), or the browser's setup page alone (/?setup, welcome.py --setup).
-// Add statements (mode="add") is the short version over the dashboard: no welcome, theme or spending steps, and
-// finishing leaves the saved theme and expected spending alone.
+// Add statements (mode="add") is the short version over the dashboard: no welcome or spending steps, and
+// finishing leaves the saved expected spending alone.
 // One screen per step, no page scroll. The server already swapped its one-time link token for an HttpOnly cookie
 // (sent automatically); every call adds the X-Setup header, which other sites can't send without a CORS preflight.
-const SETUP_STEPS = ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 'Finish'] as const
+const SETUP_STEPS = ['Welcome', 'Statements', 'Passwords', 'Spending', 'Finish'] as const
 const ADD_STEPS = ['Statements', 'Passwords', 'Finish'] as const
 type Step = (typeof SETUP_STEPS)[number]
 
@@ -54,7 +53,7 @@ type BankRow = { id: string; name: string; saved: boolean }
 type FileRow = { name: string; bank: string | null; locked: boolean; ok: boolean; uploaded: boolean }
 // gmail: the Google keys are set; google: the Gmail settings (the secret only as saved or not); folder: the data folder
 type Google = { id: string; secret: boolean; project: string; topic: string; subscription: string }
-type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[]; gmail: boolean; google: Google; folder: string }
+type State = { banks: BankRow[]; files: FileRow[]; plan: PlanItem[]; gmail: boolean; google: Google; folder: string }
 type Api = (path: string, body?: unknown, raw?: boolean) => Promise<any>   // JSON from welcome.py; each caller reads its own fields
 
 
@@ -63,8 +62,8 @@ const ghost = 'inline-flex items-center justify-center gap-2 rounded-full border
 
 // mode: App.tsx says which; none = the browser's setup page. Over the dashboard (onClose, Settings) the full setup
 // skips its Welcome screen.
-export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
-  theme: ReturnType<typeof useTheme>; mode?: 'setup' | 'add'; onClose?: () => void
+export function Wizard({ mode, onClose }: {
+  mode?: 'setup' | 'add'; onClose?: () => void
 }) {
   const add = mode === 'add'
   const steps: readonly Step[] = add ? ADD_STEPS : onClose ? SETUP_STEPS.slice(1) : SETUP_STEPS
@@ -95,7 +94,7 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
 
   const go = (d: number) => { setError(''); setStep((s) => s + d) }
   // Esc goes back to the dashboard, like the Dashboard button (only over it: onClose). Not while files upload or the
-  // update builds, nor after it worked (the page reloads by itself then). A popover or menu closes first: MUI stops
+  // update builds, nor after it worked (the page reloads by itself then). A popover or menu closes first: Base UI stops
   // its Esc before it reaches the window.
   const closable = !!onClose && !building && !uploading && !result?.ok
   useEffect(() => {
@@ -105,27 +104,23 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
     return () => window.removeEventListener('keydown', esc)
   }, [closable, onClose])
   const finish = async () => {
-    // The loader animates even in the app window (DESIGN.md "Desktop app window"). Switched on here, before it
-    // mounts: its children start their animations before any effect of its own could.
-    MotionGlobalConfig.skipAnimations = false
     setBuilding(true)
     setResult(null)
     setProgress({ stage: 'start', done: 0, total: 0 })
     // The build answers only when it's done; meanwhile ask what it's doing, for the loader.
     const poll = setInterval(() => api('/api/progress').then((p: Progress) => p.stage && setProgress(p)).catch(() => {}), 300)
     try {
-      const r = await api('/api/finish', add ? {} : { theme: theme.id, plan })
+      const r = await api('/api/finish', add ? {} : { plan })
       clearInterval(poll)
       if (HOSTED && r.ok) {
         // The app: the loader lands on "Done", this page's content fades to its bare background, and the page reloads
-        // for the new data (it's baked into the page); in the window the dashboard then plays its entrance (main.tsx).
-        // Web Animations API: the window skips Motion animations.
+        // for the new data (it's baked into the page), which then plays the dashboard's entrance.
         setProgress({ stage: 'done', done: 0, total: 0 })
         setTimeout(() => {
           for (const c of document.querySelector('[data-od-id="setup-wizard"]')?.children ?? [])
             c.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'ease-out', fill: 'forwards' })
           // by the clock, not the animations' `finished` (a cancelled one never resolves): nothing can keep it here
-          setTimeout(() => location.replace(APP ? '?app&updated' : '?web'), 420)
+          setTimeout(() => location.replace(APP ? '?app' : '?web'), 420)
         }, 900)
         return
       }
@@ -133,7 +128,6 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
     }
     catch (e) { setResult({ ok: false, log: (e as Error).message }) }
     clearInterval(poll)
-    MotionGlobalConfig.skipAnimations = APP   // back to main.tsx's setting
     setBuilding(false)
   }
 
@@ -141,7 +135,6 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
     Welcome: null,   // the full-screen Hero, rendered below
     Statements: <Statements key="s" add={add} api={api} st={st} refresh={refresh} onError={setError} onBusy={setUploading} />,
     Passwords: <Passwords key="p" api={api} st={st} banks={lockedBanks} refresh={refresh} />,
-    Theme: <ThemeStep key="t" current={theme.id} pick={pickTheme} />,
     Spending: <Spending key="e" plan={plan} setPlan={setPlan} />,
     Finish: <Finish key="f" add={add} settings={!!onClose} building={building} progress={progress} result={result} retry={finish}
       api={api} st={st} refresh={refresh} onError={setError} />,
@@ -261,6 +254,12 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
   add: boolean; api: Api; st: State | null; refresh: () => Promise<void>; onError: (m: string) => void; onBusy: (n: number) => void
 }) {
   const [over, setOver] = useState(false)
+  const [asking, setAsking] = useState('')   // a file that was already there: removing it asks first
+  const remove = async (name: string) => {
+    await api('/api/remove', { name, confirm: true }).catch((x) => onError(x.message))
+    setAsking('')
+    refresh()
+  }
   const [busy, setBusy] = useState<string[]>([])
   const addFiles = async (list: FileList | null) => {
     const pdfs = Array.from(list ?? [])
@@ -315,11 +314,18 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
                 {(st?.banks ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             )}
-            {f.uploaded && (
+            {asking !== f.name && (
               <button type="button" aria-label={`Remove ${f.name}`} className="grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-neg"
-                onClick={async () => { await api('/api/remove', { name: f.name }).catch((x) => onError(x.message)); refresh() }}>
+                onClick={() => (f.uploaded ? remove(f.name) : setAsking(f.name))}>
                 <Trash2 className="size-4" />
               </button>
+            )}
+            {asking === f.name && (
+              <div role="alert" className="flex w-full flex-wrap items-center gap-2 rounded-xl bg-neg/10 px-3 py-2 text-xs">
+                <span className="min-w-0 flex-1">Delete this PDF from Statement/? Its transactions leave the dashboard at the next update.</span>
+                <button type="button" className={cn(ghost, 'py-1.5 text-neg')} onClick={() => remove(f.name)}>Remove</button>
+                <button type="button" className={cn(ghost, 'py-1.5')} onClick={() => setAsking('')}>Keep</button>
+              </div>
             )}
           </li>
         ))}
@@ -440,40 +446,6 @@ function Unlock({ api, bank, files, saved, refresh }: { api: Api; bank: string; 
   )
 }
 
-function ThemeStep({ current, pick }: { current: string; pick: (id: string) => void }) {
-  return (
-    <Frame title="Pick a look" sub="Change it any time with the sun / moon button at the top of the dashboard.">
-      <div className="grid min-h-0 grid-cols-2 gap-3 overflow-y-auto" role="group" aria-label="Theme">
-        {THEMES.map((t) => {
-          const on = t.id === current
-          return (
-            <button key={t.id} type="button" aria-pressed={on} onClick={() => pick(t.id)}
-              className={cn('rounded-3xl border p-2 text-left transition hover:shadow-md', on && 'ring-2 ring-brand')}>
-              {/* a tiny dashboard drawn with the theme's own tokens */}
-              <div className={cn(t.mode, 'rounded-2xl bg-background p-3')} data-theme={t.id} aria-hidden>
-                <div className="flex gap-2">
-                  <div className="flex-1 rounded-xl bg-card p-2 ring-1 ring-foreground/10">
-                    <div className="h-1.5 w-10 rounded bg-muted-foreground/50" />
-                    <div className="mt-2 h-3 w-16 rounded bg-foreground/80" />
-                  </div>
-                  <div className="w-9 rounded-xl bg-brand" />
-                </div>
-                <div className="mt-2 flex h-9 items-end gap-1">
-                  {[40, 70, 35, 90, 55, 65, 30].map((h, i) => <span key={i} className="flex-1 rounded-sm bg-expense/70" style={{ height: `${h}%` }} />)}
-                </div>
-              </div>
-              <div className="flex items-start justify-between gap-2 px-1.5 pt-2">
-                <div><p className="text-sm font-medium">{t.label}</p><p className="text-xs text-muted-foreground">{t.note}</p></div>
-                {on && <Check className="mt-0.5 size-4 shrink-0 text-brand" />}
-              </div>
-            </button>
-          )
-        })}
-      </div>
-    </Frame>
-  )
-}
-
 function Spending({ plan, setPlan }: { plan: PlanItem[]; setPlan: (p: PlanItem[]) => void }) {
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
@@ -492,7 +464,7 @@ function Spending({ plan, setPlan }: { plan: PlanItem[]; setPlan: (p: PlanItem[]
         <Input aria-label="What" placeholder="e.g. Lunch, rent" value={name} onChange={(e) => setName(e.target.value)} className="h-10 rounded-full" />
         <Input aria-label="Amount in baht" type="number" inputMode="decimal" min={0} step="any" placeholder="฿" value={amount}
           onChange={(e) => setAmount(e.target.value)} className="num h-10 rounded-full text-right" />
-        <Segmented id="setup-every" label="How often" value={every} onChange={setEvery} options={[{ value: 'day', label: 'Daily' }, { value: 'month', label: 'Monthly' }]} />
+        <Segmented label="How often" value={every} onChange={setEvery} options={[{ value: 'day', label: 'Daily' }, { value: 'month', label: 'Monthly' }]} />
         <button type="submit" className={cn(primary, 'px-4')} disabled={!name.trim() || !amt}><Plus className="size-4" />Add</button>
       </form>
       <ul className="min-h-0 divide-y overflow-y-auto rounded-2xl border" aria-label="Regular spending">
@@ -581,11 +553,12 @@ function GmailSettings({ api, st, refresh, onError }: {
   const [typed, setTyped] = useState<Partial<Record<keyof Google, string>>>({})
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [shown, setShown] = useState(false)
   const value = (k: keyof Google) => typed[k] ?? (k === 'secret' ? '' : st?.google?.[k] || '')
   const field = (k: keyof Google, label: string, placeholder = '') => (
     <label className="block space-y-1">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <Input type={k === 'secret' ? 'password' : 'text'} autoComplete="off" spellCheck={false} value={value(k)} placeholder={placeholder}
+      <Input type={k === 'secret' || !shown ? 'password' : 'text'} autoComplete="off" spellCheck={false} value={value(k)} placeholder={placeholder}
         onChange={(e) => { setTyped((t) => ({ ...t, [k]: e.target.value })); setSaved(false) }} className="h-10 rounded-xl" />
     </label>
   )
@@ -631,10 +604,26 @@ function GmailSettings({ api, st, refresh, onError }: {
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Save Gmail settings
           </button>
           {saved && <span role="status" className="text-xs text-pos">Saved.</span>}
+          <Reveal what="the Gmail settings" shown={shown} onShown={setShown} />
         </div>
       </form>
       {st?.gmail && <GmailFetch api={api} refresh={refresh} onError={onError} />}
     </section>
+  )
+}
+
+// Account details (Gmail keys, the folder path, which names the user) show as dots until asked for, and the asking is
+// confirmed: Settings may be open while someone else sees the screen.
+function Reveal({ what, shown, onShown }: { what: string; shown: boolean; onShown: (v: boolean) => void }) {
+  const [asking, setAsking] = useState(false)
+  if (shown) return <button type="button" className={ghost} onClick={() => onShown(false)}><EyeOff className="size-4" />Hide</button>
+  if (!asking) return <button type="button" className={ghost} onClick={() => setAsking(true)}><Eye className="size-4" />Show</button>
+  return (
+    <span role="alert" className="flex flex-wrap items-center gap-2 text-xs">
+      Show {what} on screen?
+      <button type="button" className={cn(ghost, 'py-1.5')} onClick={() => { setAsking(false); onShown(true) }}>Show</button>
+      <button type="button" className={cn(ghost, 'py-1.5')} onClick={() => setAsking(false)}>Cancel</button>
+    </span>
   )
 }
 
@@ -645,6 +634,7 @@ function YourData({ api, folder, onError }: { api: Api; folder: string; onError:
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
   const [gone, setGone] = useState(false)
+  const [shown, setShown] = useState(false)
   const wipe = async () => {
     setBusy(true)
     try {
@@ -665,7 +655,7 @@ function YourData({ api, folder, onError }: { api: Api; folder: string; onError:
     <section className="space-y-3 rounded-2xl border p-4" data-od-id="your-data">
       <div>
         <p className="text-sm font-medium">Your data</p>
-        <p className="text-xs text-muted-foreground">Statements, ledger and settings stay on this computer, in <span className="num break-all">{folder}</span></p>
+        <p className="text-xs text-muted-foreground">Statements, ledger and settings stay on this computer, in <span className="num break-all">{shown ? folder : '••••••••••••'}</span></p>
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" className={ghost} onClick={() => api('/api/folder', {}).catch((e) => onError(e.message))}>
@@ -676,6 +666,7 @@ function YourData({ api, folder, onError }: { api: Api; folder: string; onError:
             <Trash2 className="size-4" />Delete all my data…
           </button>
         )}
+        <Reveal what="the folder path" shown={shown} onShown={setShown} />
       </div>
       {asking && (
         <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (typed === 'DELETE') wipe() }}>
@@ -706,9 +697,8 @@ const STAGES: Record<string, { label: string; icon: LucideIcon; at: number }> = 
   done: { label: 'Done', icon: Check, at: 1 },
 }
 
-// The build's loader: a ring that fills as statements are read, the stage's icon, a short label. The app window skips
-// animations (main.tsx); this is the one place they play there (finish() switches them on), so the wait reads as work.
-// reducedMotion "never": the window also reports reduced motion (app.py), which would still the spinner.
+// The build's loader: a ring that fills as statements are read, the stage's icon, a short label.
+// reducedMotion "never": it is progress feedback, so it moves even when the OS asks for reduced motion.
 function Loader({ p }: { p: Progress }) {
   const s = STAGES[p.stage] ?? STAGES.start
   const fill = p.stage === 'read' && p.total ? s.at + 0.7 * (p.done / p.total) : s.at

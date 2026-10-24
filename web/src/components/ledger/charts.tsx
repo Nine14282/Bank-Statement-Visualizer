@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, XAxis, YAxis, type TooltipContentProps } from 'recharts'
 import { ChartContainer, ChartTooltip, type ChartConfig } from '@/components/ui/chart'
 import { baht, daily, monthLabel, type Summary } from '@/lib/ledger'
-import { useStill } from '@/lib/utils'
 
 const flowConfig = {
   inc: { label: 'Income', color: 'var(--income)' },
@@ -14,7 +13,8 @@ const barsConfig = { out: { label: 'Money out', color: 'var(--expense)' } } sati
 
 // Axis money: ฿0, ฿500, ฿5.5k, ฿22k
 const k = (v: number) => (Math.abs(v) >= 1000 ? `฿${+(v / 1000).toFixed(1)}k` : `฿${v}`)
-const SPEED = 600  // chart draw-in, ms; off entirely under reduced motion
+// No draw-in (isAnimationActive={false}): Recharts animates by re-rendering the SVG every frame, about half the
+// page's script work on load.
 const tick = { fontFamily: 'var(--font-mono)', fontSize: 11 }
 const day = (d: string) => `${+d.slice(8)} ${monthLabel(d).split(' ')[0]}`
 const tipBox = 'rounded-2xl border bg-popover/95 px-3.5 py-2.5 text-popover-foreground shadow-xl backdrop-blur'
@@ -41,7 +41,6 @@ function FlowTip({ active, payload }: TipProps) {
 
 // Smooth income / expense curves per month, soft gradient underneath (the "Overview" chart).
 export function FlowLines({ months }: { months: Summary['months'] }) {
-  const still = useStill()
   return (
     <ChartContainer config={flowConfig} className="aspect-auto h-72 w-full lg:h-80" role="img"
       aria-label={`Monthly income (solid line) and expenses (dashed line), ${months.length} months from ${months[0] ? monthLabel(months[0].m) : '—'}`}>
@@ -61,7 +60,7 @@ export function FlowLines({ months }: { months: Summary['months'] }) {
         <ChartTooltip content={FlowTip} cursor={{ stroke: 'var(--muted-foreground)', strokeDasharray: '4 4' }} />
         {(['inc', 'exp'] as const).map((s) => (
           <Area key={s} dataKey={s} type="monotone" stroke={`var(--color-${s})`} strokeWidth={2.5} strokeDasharray={s === 'exp' ? '7 5' : undefined} fill={`url(#fill-${s})`}
-            activeDot={{ r: 6, strokeWidth: 3, stroke: 'var(--card)' }} isAnimationActive={!still} animationDuration={SPEED} animationEasing="ease-out" />
+            activeDot={{ r: 6, strokeWidth: 3, stroke: 'var(--card)' }} isAnimationActive={false} />
         ))}
       </AreaChart>
     </ChartContainer>
@@ -80,7 +79,6 @@ function BalanceTip({ active, payload }: TipProps) {
 }
 
 export function BalanceArea({ balance: all }: { balance: Summary['balance'] }) {
-  const still = useStill()
   // one point per day (that day's last balance): same line, a fraction of the SVG nodes and hover targets
   const balance = useMemo(() => [...new Map(all.map((p) => [p.date.slice(0, 10), p])).values()], [all])
   const top = Math.max(1000, Math.ceil(Math.max(...balance.map((p) => p.b), 0) / 1000) * 1000)
@@ -104,7 +102,7 @@ export function BalanceArea({ balance: all }: { balance: Summary['balance'] }) {
           ticks={ticks} tickFormatter={(t) => { const d = new Date(t); return monthLabel(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`) }} />
         <YAxis tick={tick} domain={[0, top]} tickFormatter={k} tickLine={false} axisLine={false} width={54} />
         <ChartTooltip content={BalanceTip} cursor={{ stroke: 'var(--muted-foreground)', strokeDasharray: '4 4' }} />
-        <Area dataKey="b" type="linear" stroke="var(--color-b)" strokeWidth={1.75} fill="url(#balfill)" dot={false} isAnimationActive={!still} animationDuration={SPEED} />
+        <Area dataKey="b" type="linear" stroke="var(--color-b)" strokeWidth={1.75} fill="url(#balfill)" dot={false} isAnimationActive={false} />
       </AreaChart>
     </ChartContainer>
   )
@@ -113,7 +111,6 @@ export function BalanceArea({ balance: all }: { balance: Summary['balance'] }) {
 // Money out per day, dashed line at the daily average; the hovered day (else the biggest) is lit and carries a
 // date pill. Pills on edge days align to the bar's outer side so they never leave the card.
 export function DailyBars({ days, avg }: { days: ReturnType<typeof daily>; avg: number }) {
-  const still = useStill()
   const [hot, setHot] = useState<number | null>(null)
   const peak = days.reduce((m, d, i) => (d.out > days[m].out ? i : m), 0)
   const on = hot ?? peak
@@ -131,7 +128,7 @@ export function DailyBars({ days, avg }: { days: ReturnType<typeof daily>; avg: 
         <XAxis dataKey="d" hide />
         <YAxis hide domain={[0, 'dataMax']} />
         <ReferenceLine y={avg} stroke="var(--muted-foreground)" strokeDasharray="4 4" strokeOpacity={0.7} />
-        <Bar dataKey="out" radius={6} minPointSize={4} isAnimationActive={!still} animationDuration={SPEED}>
+        <Bar dataKey="out" radius={6} minPointSize={4} isAnimationActive={false}>
           {days.map((d, i) => (
             <Cell key={d.d} fill={i === on ? 'url(#barhot)' : 'color-mix(in oklab, var(--expense) 24%, transparent)'} style={{ transition: 'fill .2s' }} />
           ))}

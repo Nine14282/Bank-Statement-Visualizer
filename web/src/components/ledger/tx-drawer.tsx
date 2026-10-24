@@ -1,11 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Copy, X } from 'lucide-react'
-import Chip from '@mui/material/Chip'
-import Divider from '@mui/material/Divider'
-import Drawer from '@mui/material/Drawer'
-import IconButton from '@mui/material/IconButton'
-import Snackbar from '@mui/material/Snackbar'
-import Typography from '@mui/material/Typography'
+import { Badge } from '@/components/ui/badge'
+import { Sheet, SheetClose, SheetContent } from '@/components/ui/sheet'
 import { LATE_NOTE, RULES, TX, bankName, baht, lateNight, merchant, onData, ruleFor, rowsFor, saveRules, signed, type Rule, type Tx } from '@/lib/ledger'
 import { cn } from '@/lib/utils'
 
@@ -57,36 +53,41 @@ export function LabelForm({ tx, rule = ruleFor(tx.desc) }: { tx: Tx; rule?: Rule
 
 export function TxDrawer({ tx, onClose }: { tx: Tx | null; onClose: () => void }) {
   const [toast, setToast] = useState('')
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(''), 2200)
+    return () => clearTimeout(t)
+  }, [toast])
   const copy = async () => {
     try { await navigator.clipboard.writeText(tx!.desc); setToast('Description copied') }
     catch { setToast('Copy not available here') }
   }
   return (
-    <>
-      <Drawer anchor="right" open={!!tx} onClose={onClose}
-        slotProps={{ paper: { sx: { width: 'min(420px, 100vw)', bgcolor: 'var(--card)', color: 'var(--foreground)',
-          borderLeft: '1px solid var(--border)' } } }}>
+    <Sheet open={!!tx} onOpenChange={(open) => { if (!open) onClose() }}>
+      <SheetContent showCloseButton={false} aria-label="Transaction details"
+        className="gap-0 overflow-y-auto bg-card text-foreground data-[side=right]:w-[min(420px,100vw)] data-[side=right]:sm:max-w-none">
         {tx && (
-          <div className="flex h-full flex-col p-5">
+          <div className="flex min-h-full flex-col p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="eyebrow">Transaction</p>
-                <Typography component="h2" className="display text-3xl">{tx.date.slice(0, 10)}</Typography>
+                <h2 className="display text-3xl">{tx.date.slice(0, 10)}</h2>
                 <p className="num text-xs text-muted-foreground">{tx.date.slice(11)}</p>
               </div>
-              <IconButton aria-label="Close details" onClick={onClose} sx={{ color: 'var(--muted-foreground)' }}><X className="size-4" /></IconButton>
+              <SheetClose aria-label="Close details"
+                className="grid size-10 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"><X className="size-4" /></SheetClose>
             </div>
 
             <div className={cn('display mt-6 text-5xl', tx.amt >= 0 ? 'text-pos' : 'text-neg')}>{signed(tx.amt)}</div>
             <div className="mt-2">
-              <Chip size="small" variant="outlined" label={tx.cat} sx={{ color: 'inherit', borderColor: 'var(--border)' }} />
+              <Badge variant="outline">{tx.cat}</Badge>
             </div>
 
-            <Divider sx={{ my: 3, borderColor: 'var(--border)' }} />
+            <hr className="my-6" />
             <Row label="Account">{bankName(tx.bank)}</Row>
             <Row label="Type">{tx.amt >= 0 ? 'Money in' : 'Money out'}</Row>
             <Row label="Balance after">{tx.bal == null ? '— (manual entry)' : baht(tx.bal)}</Row>
-            <Divider sx={{ borderColor: 'var(--border)' }} />
+            <hr />
 
             {tx.label && <p className="mt-4 text-lg font-medium">{tx.label}</p>}
             <p className="eyebrow mt-4">Description</p>
@@ -96,12 +97,13 @@ export function TxDrawer({ tx, onClose }: { tx: Tx | null; onClose: () => void }
               className="mt-4 inline-flex w-fit items-center gap-2 rounded-lg border px-3 py-1.5 text-sm hover:bg-muted">
               <Copy className="size-4" />Copy description
             </button>
-            <Divider sx={{ mt: 3, borderColor: 'var(--border)' }} />
+            <hr className="mt-6" />
             <LabelForm key={tx.date + tx.desc + tx.amt} tx={tx} />
           </div>
         )}
-      </Drawer>
-      <Snackbar open={!!toast} autoHideDuration={2200} onClose={() => setToast('')} message={toast} />
-    </>
+        {/* inside the sheet: a modal sheet hides the rest of the page from screen readers */}
+        {toast && <div role="status" className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg bg-foreground px-4 py-3 text-sm text-background shadow-lg">{toast}</div>}
+      </SheetContent>
+    </Sheet>
   )
 }

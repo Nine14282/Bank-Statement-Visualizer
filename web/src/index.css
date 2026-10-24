@@ -58,6 +58,7 @@
 }
 
 :root, .light {
+    color-scheme: light;   /* native scrollbars, inputs and pickers follow the theme */
     --background: oklch(0.962 0.006 285);
     --foreground: oklch(0.17 0.01 285);
     --card: oklch(1 0 0);
@@ -80,6 +81,7 @@
 }
 
 .dark {
+    color-scheme: dark;
     --background: oklch(0.14 0.006 320);
     --foreground: oklch(0.94 0.004 320);
     --card: oklch(0.185 0.007 320);
@@ -166,7 +168,8 @@
   to   { background-color: transparent; }
 }
 .tx-new { animation: tx-slide 0.7s cubic-bezier(0.16, 1, 0.3, 1), tx-glow 4s ease-out; }   /* no fill: a finished slide must not lock transform (the push-down, tx-table.tsx) */
-@media (prefers-reduced-motion: reduce) { :root:not(.in-app) .tx-new { animation: tx-glow 4s ease-out; } }   /* .in-app: main.tsx */
+@media (prefers-reduced-motion: reduce) { .tx-new { animation: tx-glow 4s ease-out; } }
+.tx-glow { animation: tx-glow 4s ease-out; }   /* the glow alone: Recent transactions slides its rows in with Motion */
 
 /* Ambient glow behind the greeting (App.tsx): two still, blurred blobs in the accent colours. */
 .glow { position: absolute; border-radius: 9999px; filter: blur(80px); opacity: 0.22; pointer-events: none; }
@@ -174,11 +177,7 @@
 /* Filled bar (widgets.tsx MonthSpend): grows in from the left. */
 @keyframes bar-in { from { transform: scaleX(0); } }
 .bar-in { transform-origin: left; animation: bar-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
-@media (prefers-reduced-motion: reduce) { :root:not(.arriving) .bar-in { animation: none; } }   /* .arriving: main.tsx */
-/* The app window's entrance after an update (.arriving, main.tsx): the top bar and nav rail appear too; cards, charts
-   and figures animate through Motion. `transform` only: the nav rail keeps its own centring in `translate`. */
-@keyframes appear { from { opacity: 0; transform: translateY(-8px); } }
-.arriving :is(header[data-od-id="topbar"], nav[data-od-id="sidebar"]) { animation: appear 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+@media (prefers-reduced-motion: reduce) { .bar-in { animation: none; } }
 
 /* Setup welcome (components/setup/wizard.tsx Hero): the theme's own background with slowly drifting glows in the
    brand violet (and a little of the expense coral, as on the dashboard). Text uses the theme's foreground tokens,

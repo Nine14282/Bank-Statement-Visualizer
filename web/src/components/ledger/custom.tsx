@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Search, Trash2 } from 'lucide-react'
 import { Reveal } from '@/components/ledger/motion'
 import { LabelForm } from '@/components/ledger/tx-drawer'
+import { Pager } from '@/components/ledger/tx-table'
 import { PayeeAvatar, Segmented } from '@/components/ledger/widgets'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +23,7 @@ const ruleStats = () => RULES.map((r) => {
 let RULE_STATS = ruleStats()
 onData(() => { RULE_STATS = ruleStats() })
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+const PAGE = 10  // payees per page
 
 // "Custom Your Transaction" tab: every payee (money out) or payer (money in), with the same label editor the
 // transaction drawer has. Labels are browser-local rules; saving reloads, and the #custom hash brings you back here.
@@ -34,6 +36,13 @@ export function CustomTab() {
     const t = q.trim().toLowerCase()
     return t ? all.filter((p) => `${p.name} ${p.key} ${p.last.desc} ${p.last.cat}`.toLowerCase().includes(t)) : all
   }, [all, q])
+  const [page, setPage] = useState(1)
+  // back to page 1 whenever the list changes (search, direction, new data), set during render like TxTable
+  const [seenList, setSeenList] = useState(list)
+  if (seenList !== list) {
+    setSeenList(list)
+    setPage(1)
+  }
   const [sel, setSel] = useState<Tx | null>(null)
   const [selRule, setSelRule] = useState<Rule | undefined>()
   const tx = sel ?? list[0]?.last ?? null
@@ -74,7 +83,7 @@ export function CustomTab() {
                   <Input className="rounded-full pl-9" placeholder="Search name, description, category…" aria-label="Search payees"
                     value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
-                <Segmented id="custom-dir" label="Direction" value={dir} onChange={(v) => { setDir(v); setSel(null); setSelRule(undefined) }}
+                <Segmented label="Direction" value={dir} onChange={(v) => { setDir(v); setSel(null); setSelRule(undefined) }}
                   options={[{ value: 'out', label: 'Money out' }, { value: 'in', label: 'Money in' }]} />
               </div>
               {elsewhere > 0 && (
@@ -83,16 +92,15 @@ export function CustomTab() {
                   {`${elsewhere} ${elsewhere === 1 ? 'match' : 'matches'}`} in {dir === 'in' ? 'Money out' : 'Money in'} → show
                 </button>
               )}
-              <ul className="max-h-[38rem] divide-y overflow-y-auto rounded-2xl border">
+              <ul className="divide-y rounded-2xl border">
                 {list.length === 0 && <li className="py-10 text-center text-sm text-muted-foreground">Nothing matches your search{elsewhere ? '' : '.'}</li>}
-                {list.map((x) => {
+                {list.slice((page - 1) * PAGE, page * PAGE).map((x) => {
                   const on = x === p
                   return (
                     <li key={x.key}>
                       <button type="button" onClick={() => pick(x.last)} aria-pressed={on}
                         className="relative grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/60">
-                        {on && <motion.span layoutId="custom-pick" className="absolute inset-0 bg-brand/10 ring-1 ring-brand/40 ring-inset"
-                          transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
+                        {on && <span className="absolute inset-0 bg-brand/10 ring-1 ring-brand/40 ring-inset" />}
                         <span className="relative"><PayeeAvatar p={x} size={38} /></span>
                         <span className="relative min-w-0">
                           <span className="flex items-center gap-2">
@@ -108,6 +116,7 @@ export function CustomTab() {
                   )
                 })}
               </ul>
+              <Pager label="Payee pages" page={page} per={PAGE} total={list.length} onTurn={setPage} />
             </CardContent>
           </Card>
         </Reveal>

@@ -1,24 +1,21 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import Avatar from '@mui/material/Avatar'
-import MuiTooltip from '@mui/material/Tooltip'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Gauge, Hourglass, Receipt, Smartphone } from 'lucide-react'
 import { BalanceArea, DailyBars, FlowLines } from '@/components/ledger/charts'
-import { InfoTip } from '@/components/ledger/info'
-import { CountUp } from '@/components/ledger/motion'
+import { InfoTip, Tip } from '@/components/ledger/info'
 import { TxDrawer } from '@/components/ledger/tx-drawer'
 import { BANKS } from '@/lib/banks'
 import { goTo } from '@/lib/nav'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { KEY } from '@/components/ledger/tx-table'
+import { FRESH, KEY } from '@/components/ledger/tx-table'
 import { LAST, bankName, baht, daily, descOf, monthLabel, payees, signed, thisMonth, useLedger, type Payee, type Summary, type Tx } from '@/lib/ledger'
 import { expectedFor, type PlanItem } from '@/lib/plan'
 import { EASE, cn } from '@/lib/utils'
 
-// Pill switch whose lit background slides to the picked option (one shared layoutId per switch).
-export function Segmented<T extends string>({ id, value, onChange, options, big, label, className }: {
-  id: string; value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; big?: boolean; label: string; className?: string
+// Pill switch; the picked option is lit (no slide between options).
+export function Segmented<T extends string>({ value, onChange, options, big, label, className }: {
+  value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; big?: boolean; label: string; className?: string
 }) {
   return (
     <div role="group" aria-label={label} className={cn('inline-flex flex-wrap gap-1 rounded-full border bg-card p-1', className)}>
@@ -28,8 +25,7 @@ export function Segmented<T extends string>({ id, value, onChange, options, big,
           <button key={o.value} type="button" aria-pressed={on} onClick={() => onChange(o.value)}
             className={cn('relative rounded-full font-medium whitespace-nowrap transition-colors duration-300', big ? 'px-4 py-2 text-sm pointer-coarse:min-h-11' : 'px-3 py-1.5 text-xs pointer-coarse:min-h-11',
               on ? 'text-white' : 'text-muted-foreground hover:text-foreground')}>
-            {on && <motion.span layoutId={id} transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-              className="absolute inset-0 rounded-full bg-brand shadow-[0_6px_16px_-6px_var(--brand)]" />}
+            {on && <span className="absolute inset-0 rounded-full bg-brand shadow-[0_6px_16px_-6px_var(--brand)]" />}
             <span className="relative">{o.label}</span>
           </button>
         )
@@ -39,12 +35,12 @@ export function Segmented<T extends string>({ id, value, onChange, options, big,
 }
 
 const RoundLink = ({ label, to, children }: { label: string; to: string; children: ReactNode }) => (
-  <MuiTooltip title={label}>
+  <Tip label={label}>
     <button type="button" aria-label={label} onClick={() => goTo(to)}
       className="grid size-10 place-items-center rounded-full border bg-card text-muted-foreground transition hover:-translate-y-0.5 hover:text-foreground hover:shadow-md active:scale-95">
       {children}
     </button>
-  </MuiTooltip>
+  </Tip>
 )
 
 const pct = (n: number) => `${n >= 0 ? '+' : '−'}${Math.abs(n * 100).toFixed(1)}%`
@@ -101,7 +97,7 @@ export function WalletStack({ s }: { s: Summary }) {
             <InfoTip>Money in all your bank accounts now: each statement's last balance plus payment emails after it. The % compares it with the balance at the start of the period.</InfoTip>
             {change != null && <span className={cn('num rounded-full px-2 py-0.5 text-xs font-semibold', change >= 0 ? 'bg-pos/15 text-pos' : 'bg-neg/15 text-neg')}>{pct(change)}</span>}
           </div>
-          <CountUp value={s.close} format={baht} className="display mt-1 block text-5xl sm:text-6xl" />
+          <span className="display mt-1 block text-5xl sm:text-6xl">{baht(s.close)}</span>
           <p className="num mt-1.5 text-xs text-muted-foreground">opened at {baht(s.open)}</p>
         </div>
         {s.inc > 0 && (
@@ -137,7 +133,7 @@ export function WalletStack({ s }: { s: Summary }) {
   )
 }
 
-// Income / expense curves per month, or the running balance, with the period totals counting up on top.
+// Income / expense curves per month, or the running balance, with the period totals on top.
 export function Overview({ s }: { s: Summary }) {
   const [view, setView] = useState<'flow' | 'balance' | 'table'>('flow')
   // One sentence that says what the chart shows, so the numbers read without hovering.
@@ -153,7 +149,7 @@ export function Overview({ s }: { s: Summary }) {
         <CardTitle className="text-2xl">Overview</CardTitle>
         <CardDescription>{view === 'balance' ? 'Total balance at the end of each day' : 'Income and expenses per month'}</CardDescription>
         <CardAction>
-          <Segmented id="overview-view" label="Chart" value={view} onChange={setView}
+          <Segmented label="Chart" value={view} onChange={setView}
             options={[{ value: 'flow', label: 'Cash flow' }, { value: 'balance', label: 'Balance' }, { value: 'table', label: 'Table' }]} />
         </CardAction>
       </CardHeader>
@@ -162,7 +158,7 @@ export function Overview({ s }: { s: Summary }) {
           {stats.map(([l, v, f, c]) => (
             <div key={l} className="flex min-w-0 items-center justify-between gap-2 rounded-2xl bg-muted/60 px-4 py-3 sm:block">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><span className="size-2 rounded-full" style={{ background: c }} />{l}</div>
-              <CountUp value={v} format={f} className="display mt-0.5 block truncate text-2xl lg:text-3xl" />
+              <span className="display mt-0.5 block truncate text-2xl lg:text-3xl">{f(v)}</span>
             </div>
           ))}
         </div>
@@ -247,7 +243,7 @@ export function MonthSpend({ plan, onPlan }: { plan: PlanItem[]; onPlan: () => v
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <CountUp value={t.spent} format={baht} className="display text-3xl" />
+          <span className="display text-3xl">{baht(t.spent)}</span>
           {expected > 0 && (
             <span className={cn('num ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold', over ? 'bg-neg/15 text-neg' : 'bg-pos/15 text-pos')}>
               {baht(Math.abs(diff))} {over ? 'over' : 'saved'}</span>
@@ -306,8 +302,8 @@ const face = (p: Payee) =>
 
 // Neutral faces: the colour budget stays on money (income / spending / good / bad), not on decoration.
 export const PayeeAvatar = ({ p, size = 46 }: { p: Payee; size?: number }) => (
-  <Avatar sx={{ width: size, height: size, fontSize: size / 3, fontWeight: 600, color: 'var(--foreground)', bgcolor: 'var(--muted)',
-    border: '1px solid var(--border)', transition: 'transform .2s', '&:hover': { transform: 'scale(1.06)' } }}>{face(p)}</Avatar>
+  <span style={{ width: size, height: size, fontSize: size / 3 }}
+    className="grid shrink-0 select-none place-items-center rounded-full border bg-muted font-semibold text-foreground transition-transform duration-200 hover:scale-[1.06]">{face(p)}</span>
 )
 
 // Who you pay most often: pick a face to see the total, then jump to those payments (naming them is the Custom tab).
@@ -327,12 +323,12 @@ export function Payees({ rows, onShow }: { rows: Tx[]; onShow: (term: string) =>
         {!p ? <p className="text-sm text-muted-foreground">No payments in this period.</p> : <>
           <div className="no-scrollbar -mx-1 flex gap-2.5 overflow-x-auto px-1 py-1">
             {list.map((x, i) => (
-              <MuiTooltip key={x.key} title={x.name}>
+              <Tip key={x.key} label={x.name}>
                 <button type="button" onClick={() => setPick(i)} aria-label={x.name} aria-pressed={x === p} className="relative shrink-0 rounded-full p-[3px]">
-                  {x === p && <motion.span layoutId="payee-ring" className="absolute inset-0 rounded-full border-2 border-brand" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
+                  {x === p && <span className="absolute inset-0 rounded-full border-2 border-brand" />}
                   <PayeeAvatar p={x} />
                 </button>
-              </MuiTooltip>
+              </Tip>
             ))}
           </div>
           <AnimatePresence mode="wait" initial={false}>
@@ -356,7 +352,8 @@ export function Payees({ rows, onShow }: { rows: Tx[]; onShow: (term: string) =>
   )
 }
 
-// The newest few rows of the period; click one for its details.
+// The newest few rows of the period; click one for its details. A live update (main.tsx): new rows fade in and glow
+// like the full table's (.tx-glow), older ones glide down (layout), the one pushed off the end fades out.
 export function RecentTx({ rows }: { rows: Tx[] }) {
   const [open, setOpen] = useState<Tx | null>(null)
   const last = rows.slice(-6).reverse()
@@ -371,9 +368,11 @@ export function RecentTx({ rows }: { rows: Tx[] }) {
       </CardHeader>
       <CardContent>
         <ul className="divide-y">
+          <AnimatePresence initial={false}>
           {last.map((r, i) => (
-            <motion.li key={KEY.get(r)} initial={{ opacity: 0, x: -10 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
-              transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}>
+            <motion.li key={KEY.get(r)} layout initial={{ opacity: 0, x: -10 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
+              exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}
+              className={cn(FRESH.has(KEY.get(r)!) && 'tx-glow rounded-xl')}>
               <button type="button" onClick={() => setOpen(r)}
                 className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl py-2.5 text-left transition-colors hover:bg-muted/60 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:px-1">
                 <span className={cn('grid size-9 place-items-center rounded-full', r.amt >= 0 ? 'bg-income/15 text-income' : 'bg-expense/15 text-expense')}>
@@ -388,6 +387,7 @@ export function RecentTx({ rows }: { rows: Tx[] }) {
               </button>
             </motion.li>
           ))}
+          </AnimatePresence>
         </ul>
       </CardContent>
       <TxDrawer tx={open} onClose={() => setOpen(null)} />
@@ -412,7 +412,7 @@ export function MoneyMovement() {
         </CardTitle>
         <CardDescription>Money out per day, up to {LAST}</CardDescription>
         <CardAction>
-          <Segmented id="movement-range" label="Days" value={n} onChange={setN}
+          <Segmented label="Days" value={n} onChange={setN}
             options={[{ value: '7', label: '7d' }, { value: '30', label: '30d' }, { value: '90', label: '90d' }]} />
         </CardAction>
       </CardHeader>
@@ -420,11 +420,11 @@ export function MoneyMovement() {
         <div className="flex justify-between">
           <div>
             <div className="text-xs text-muted-foreground">Money in</div>
-            <CountUp value={tin} format={baht} className="num text-base font-semibold text-pos" />
+            <span className="num text-base font-semibold text-pos">{baht(tin)}</span>
           </div>
           <div className="text-right">
             <div className="text-xs text-muted-foreground">Money out</div>
-            <CountUp value={tout} format={baht} className="num text-base font-semibold text-neg" />
+            <span className="num text-base font-semibold text-neg">{baht(tout)}</span>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">

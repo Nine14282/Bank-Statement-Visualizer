@@ -91,3 +91,12 @@ describe('runway', () => {
     expect(L.runway(1000, 0, 2, '2026-01-10')).toEqual({ days: null, until: '—' })
   })
 })
+
+describe('pageItems', () => {
+  it('keeps the ends and the pages near the current one, a gap as one …', () => {
+    expect(L.pageItems(1, 1, 1)).toEqual([1])
+    expect(L.pageItems(5, 10, 1)).toEqual([1, '…', 4, 5, 6, '…', 10])
+    expect(L.pageItems(2, 10, 0)).toEqual([1, 2, '…', 10])
+    expect(L.pageItems(3, 4, 1)).toEqual([1, 2, 3, 4])
+  })
+})

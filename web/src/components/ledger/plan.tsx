@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { Check, Plus, Search, Trash2 } from 'lucide-react'
 import { InfoTip } from '@/components/ledger/info'
-import { CountUp, Reveal } from '@/components/ledger/motion'
+import { Reveal } from '@/components/ledger/motion'
 import { PayeeAvatar, Segmented } from '@/components/ledger/widgets'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -58,7 +58,7 @@ export function PlanTab({ plan, onPlan }: { plan: PlanItem[]; onPlan: (p: PlanIt
               <p className="flex items-center gap-1.5 text-sm text-muted-foreground">Expected for {monthLabel(LAST)} ({monthDays} days)
                 <InfoTip>Daily items × days in the month, plus every monthly item once. This is the 100% mark of the “Spent this month” bar.</InfoTip>
               </p>
-              <CountUp value={total} format={baht} className="display mt-1 block text-5xl" />
+              <span className="display mt-1 block text-5xl">{baht(total)}</span>
             </div>
             <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
               <dt className="text-muted-foreground">Daily items</dt><dd className="num text-right">{baht(daily)} × {monthDays}</dd>
@@ -85,7 +85,7 @@ export function PlanTab({ plan, onPlan }: { plan: PlanItem[]; onPlan: (p: PlanIt
                         <span className="block truncate text-sm font-medium" title={i.name}>{i.name}</span>
                         <span className="num block text-xs text-muted-foreground">= {baht(perMonth(i, monthDays))} this month{i.key ? ' · from your payments' : ''}</span>
                       </span>
-                      <Segmented id={`every-${i.id}`} label={`How often for ${i.name}`} value={i.every} onChange={(v) => edit(i.id, { every: v })} options={EVERY} />
+                      <Segmented label={`How often for ${i.name}`} value={i.every} onChange={(v) => edit(i.id, { every: v })} options={EVERY} />
                       <label className="flex items-center gap-1 text-sm text-muted-foreground">฿
                         <Input type="number" inputMode="decimal" min={0} step="any" aria-label={`Amount for ${i.name}`} className="num h-9 w-28 rounded-full text-right"
                           value={i.amount} onChange={(e) => edit(i.id, { amount: money(e.target.value) })} />
@@ -115,7 +115,7 @@ export function PlanTab({ plan, onPlan }: { plan: PlanItem[]; onPlan: (p: PlanIt
                   </label>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Segmented id="new-every" label="How often" value={every} onChange={setEvery} options={EVERY} />
+                  <Segmented label="How often" value={every} onChange={setEvery} options={EVERY} />
                   <button type="submit" disabled={!ok}
                     className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-white shadow-[0_8px_20px_-8px_var(--brand)] transition hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:shadow-none">
                     <Plus className="size-4" />Add</button>
