@@ -44,8 +44,9 @@ changes, update this file to match. Read it before you add or restyle a screen.
 - Touch targets are 44px: `size-11`, `pointer-coarse:min-h-11`, or an enlarged hit area (`after:-inset-2.5`) on
   small icons.
 - The setup wizard is one screen per step and the page itself never scrolls (`h-dvh`). Long content scrolls inside
-  the step's `Frame` card. Later `./run.sh` runs open the same wizard in add mode (`/?setup&add`): Statements →
-  Passwords → Finish only, listing just the new files.
+  the step's `Frame` card. Add statements opens the same wizard in add mode over the dashboard (App.tsx,
+  `mode="add"`, in the app window and the browser app at `?web`): Statements → Passwords → Finish only, listing just
+  the new files. Settings is the full wizard minus Welcome; its last step holds the Gmail settings and "Your data".
 
 ### Motion
 

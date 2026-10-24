@@ -6,7 +6,7 @@
 # releases/latest/download/StatementVisualizer-Setup.exe. PyInstaller doesn't cross-compile, so the .exe is built here,
 # on Windows. Actions are pinned to commit SHAs; the Python packages come from uv.lock (uv sync --locked).
 #
-# Optional, off until set up (README, "Releasing the Windows program"):
+# Optional, off until set up (README, "The Windows program", Releasing):
 #   SignPath code signing of a tag's .exe and Setup: repository variables SIGNPATH_ORGANIZATION_ID and
 #     SIGNPATH_PROJECT_SLUG, secret SIGNPATH_API_TOKEN; artifact configurations in .signpath/.
 #   VirusTotal scan of a release's files, links added to its notes: secret VT_API_KEY.
@@ -233,7 +233,7 @@ jobs:
             StatementVisualizer-Setup.exe StatementVisualizer-windows.zip SHA256SUMS.txt
 
       # A second opinion from ~70 antivirus engines before people download it; a false positive shows here first
-      # (README, "Releasing the Windows program"). The free API allows 4 requests a minute.
+      # (README, "The Windows program", Releasing). The free API allows 4 requests a minute.
       - name: Scan with VirusTotal
         id: virustotal
         if: env.VT_API_KEY != ''
