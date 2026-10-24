@@ -8,7 +8,7 @@ import App from './App.tsx'
 import { theme } from '@/lib/mui-theme'
 import { META, setData } from '@/lib/ledger'
 import { initialTheme } from '@/lib/themes'
-import { APP, ARRIVE } from '@/lib/utils'
+import { APP, ARRIVE, WEB } from '@/lib/utils'
 
 const start = initialTheme()
 document.documentElement.dataset.theme = start.id   // before the first paint: no flash of the wrong theme
@@ -20,6 +20,10 @@ if (ARRIVE) document.documentElement.classList.add('arriving')   // CSS animatio
 // The app window reports reduced motion because app.py asks its web view for it, not because the user asked:
 // the new-row animations (index.css .tx-new, tx-table.tsx) check this class to play there anyway.
 if (APP) document.documentElement.classList.add('in-app')
+// Served by welcome.py (the app in the browser, or the setup page): it stops by itself a few minutes after the page is
+// gone, so while it is open the page says so.
+if (WEB || new URLSearchParams(location.search).has('setup'))
+  setInterval(() => fetch('/api/ping', { headers: { 'X-Setup': '1' } }).catch(() => {}), 30_000)
 // A file dropped outside a drop zone would replace this page with the file (the app window has no Back button; a tab
 // loses the dashboard). Drop zones (wizard.tsx) handle theirs first; everywhere else shows "no drop" and ignores it.
 for (const type of ['dragover', 'drop'] as const) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { AnimatePresence, MotionConfig, MotionGlobalConfig, motion } from 'motion/react'
 import {
-  ArrowLeft, ArrowRight, Check, CircleAlert, Eye, EyeOff, FileText, GitMerge, LayoutDashboard, Loader2, LockKeyhole,
+  ArrowLeft, ArrowRight, Check, CircleAlert, Eye, EyeOff, FileText, FolderOpen, GitMerge, LayoutDashboard, Loader2, LockKeyhole,
   Mail, Plus, ShieldCheck, Sparkles, Trash2, Upload, type LucideIcon,
 } from 'lucide-react'
 import { BankLogo, Segmented } from '@/components/ledger/widgets'
@@ -11,15 +11,14 @@ import { bankName } from '@/lib/banks'
 import { baht } from '@/lib/ledger'
 import { expectedFor, newId, type PlanItem } from '@/lib/plan'
 import { THEMES, type useTheme } from '@/lib/themes'
-import { APP, EASE, bridge, cn } from '@/lib/utils'
+import { APP, EASE, HOSTED, OPEN_APP, bridge, cn } from '@/lib/utils'
 
-// First-run setup, shown when ./run.sh's local server (workspace/welcome.py) opens the page at /?setup.
-// Later runs open the short "add statements" version at /?setup&add (welcome.py --add): no welcome, theme or
-// spending steps, and finishing leaves the saved theme and expected spending alone. The app window shows that add
-// version over its dashboard (App.tsx, onClose), never the full setup.
+// Setup: the app's first run (App.tsx, mode="setup", in the window or the browser app at ?web), Settings over the
+// dashboard (onClose: no Welcome screen), or the browser's setup page alone (/?setup, welcome.py --setup).
+// Add statements (mode="add") is the short version over the dashboard: no welcome, theme or spending steps, and
+// finishing leaves the saved theme and expected spending alone.
 // One screen per step, no page scroll. The server already swapped its one-time link token for an HttpOnly cookie
 // (sent automatically); every call adds the X-Setup header, which other sites can't send without a CORS preflight.
-const ADD = new URLSearchParams(location.search).has('add')   // the browser's add page (welcome.py --add); the app passes `mode`
 const SETUP_STEPS = ['Welcome', 'Statements', 'Passwords', 'Theme', 'Spending', 'Finish'] as const
 const ADD_STEPS = ['Statements', 'Passwords', 'Finish'] as const
 type Step = (typeof SETUP_STEPS)[number]
@@ -46,26 +45,28 @@ const api: Api = async (path, body, raw = false) => {
     body: body === undefined ? undefined : raw ? (body as Blob) : JSON.stringify(body),
   })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(j.error ?? (r.status === 403 ? `This page's session ended. Run ${ADD ? './run.sh' : './run.sh --setup'} again.` : `The setup server answered ${r.status}. Is ./run.sh still running?`))
+  if (!r.ok) throw new Error(j.error ?? (r.status === 403 ? `This page's session ended. ${OPEN_APP}` : `Statement Visualizer stopped answering (${r.status}): was its window closed? ${OPEN_APP}`))
   return j
 }
 
 type Progress = { stage: string; done: number; total: number }   // /api/progress: what the build is doing
 type BankRow = { id: string; name: string; saved: boolean }
 type FileRow = { name: string; bank: string | null; locked: boolean; ok: boolean; uploaded: boolean }
-type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[]; gmail: boolean }   // gmail: Google keys set
+// gmail: the Google keys are set; google: the Gmail settings (the secret only as saved or not); folder: the data folder
+type Google = { id: string; secret: boolean; project: string; topic: string; subscription: string }
+type State = { banks: BankRow[]; files: FileRow[]; theme: string; plan: PlanItem[]; gmail: boolean; google: Google; folder: string }
 type Api = (path: string, body?: unknown, raw?: boolean) => Promise<any>   // JSON from welcome.py; each caller reads its own fields
 
 
 const primary = 'inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-white shadow-[0_8px_20px_-8px_var(--brand)] transition hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none'
 const ghost = 'inline-flex items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm transition hover:bg-muted active:scale-95 disabled:opacity-40'
 
-// mode: the app window says which (App.tsx); the browser's page reads it from its address. Over the dashboard (onClose,
-// the app's Settings) the full setup skips its Welcome screen.
+// mode: App.tsx says which; none = the browser's setup page. Over the dashboard (onClose, Settings) the full setup
+// skips its Welcome screen.
 export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
   theme: ReturnType<typeof useTheme>; mode?: 'setup' | 'add'; onClose?: () => void
 }) {
-  const add = mode ? mode === 'add' : ADD
+  const add = mode === 'add'
   const steps: readonly Step[] = add ? ADD_STEPS : onClose ? SETUP_STEPS.slice(1) : SETUP_STEPS
   const [step, setStep] = useState(0)
   const [st, setSt] = useState<State | null>(null)
@@ -115,16 +116,16 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
     try {
       const r = await api('/api/finish', add ? {} : { theme: theme.id, plan })
       clearInterval(poll)
-      if (APP && r.ok) {
-        // App window: the loader lands on "Done", this page's content fades to its bare background, and the page reloads
-        // for the new data (it's baked into the page); the dashboard then plays its entrance (main.tsx). Web Animations
-        // API: the window skips Motion animations.
+      if (HOSTED && r.ok) {
+        // The app: the loader lands on "Done", this page's content fades to its bare background, and the page reloads
+        // for the new data (it's baked into the page); in the window the dashboard then plays its entrance (main.tsx).
+        // Web Animations API: the window skips Motion animations.
         setProgress({ stage: 'done', done: 0, total: 0 })
         setTimeout(() => {
           for (const c of document.querySelector('[data-od-id="setup-wizard"]')?.children ?? [])
             c.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, easing: 'ease-out', fill: 'forwards' })
           // by the clock, not the animations' `finished` (a cancelled one never resolves): nothing can keep it here
-          setTimeout(() => location.replace('?app&updated'), 420)
+          setTimeout(() => location.replace(APP ? '?app&updated' : '?web'), 420)
         }, 900)
         return
       }
@@ -142,7 +143,8 @@ export function Wizard({ theme: [theme, pickTheme], mode, onClose }: {
     Passwords: <Passwords key="p" api={api} st={st} banks={lockedBanks} refresh={refresh} />,
     Theme: <ThemeStep key="t" current={theme.id} pick={pickTheme} />,
     Spending: <Spending key="e" plan={plan} setPlan={setPlan} />,
-    Finish: <Finish key="f" add={add} building={building} progress={progress} result={result} retry={finish} />,
+    Finish: <Finish key="f" add={add} settings={!!onClose} building={building} progress={progress} result={result} retry={finish}
+      api={api} st={st} refresh={refresh} onError={setError} />,
   }[name]
 
   if (name === 'Welcome') return <Hero onStart={() => go(1)} />
@@ -260,20 +262,6 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
 }) {
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState<string[]>([])
-  const [mail, setMail] = useState<'' | 'busy' | string>('')   // the Gmail button: idle, fetching, or what it found
-  const fetchMail = async () => {
-    setMail('busy')
-    onBusy(1)
-    try {
-      const r = await api('/api/gmail', {})
-      setMail(r.files || r.notices
-        ? `Gmail: ${r.files} new statement${r.files === 1 ? '' : 's'}, ${r.notices} payment notice${r.notices === 1 ? '' : 's'}.`
-        : 'Gmail: nothing new.')
-    }
-    catch (e) { setMail(''); onError((e as Error).message) }
-    onBusy(0)
-    await refresh()
-  }
   const addFiles = async (list: FileList | null) => {
     const pdfs = Array.from(list ?? [])
     const bad = pdfs.filter((f) => !/\.pdf$/i.test(f.name))
@@ -307,17 +295,7 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
         <span className="text-xs text-muted-foreground">They are copied into the Statement/ folder</span>
         <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
       </label>
-      {st?.gmail && (
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className={ghost} disabled={mail === 'busy'} onClick={fetchMail}>
-            {mail === 'busy' ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
-            {mail === 'busy' ? 'Checking Gmail…' : 'Fetch from Gmail'}
-          </button>
-          <span className="text-xs text-muted-foreground" aria-live="polite">
-            {mail === 'busy' ? 'The first time, sign in to Google in your browser.' : mail}
-          </span>
-        </div>
-      )}
+      {st?.gmail && <GmailFetch api={api} refresh={refresh} onError={onError} onBusy={onBusy} />}
       <ul className="min-h-0 divide-y overflow-y-auto rounded-2xl border" aria-label="Statements">
         {!files.length && !busy.length && <li className="px-4 py-5 text-center text-sm text-muted-foreground">{add ? 'No new statements yet.' : 'No statements yet.'}</li>}
         {files.map((f) => (
@@ -357,6 +335,37 @@ function Statements({ add, api, st, refresh, onError, onBusy }: {
         </p>
       )}
     </Frame>
+  )
+}
+
+// Fetch from Gmail: the Statements step, and the Gmail settings once saved. The first press signs in to Google.
+function GmailFetch({ api, refresh, onError, onBusy }: {
+  api: Api; refresh: () => Promise<void>; onError: (m: string) => void; onBusy?: (n: number) => void
+}) {
+  const [mail, setMail] = useState<'' | 'busy' | string>('')   // idle, fetching, or what it found
+  const fetchMail = async () => {
+    setMail('busy')
+    onBusy?.(1)
+    try {
+      const r = await api('/api/gmail', {})
+      setMail(r.files || r.notices
+        ? `Gmail: ${r.files} new statement${r.files === 1 ? '' : 's'}, ${r.notices} payment notice${r.notices === 1 ? '' : 's'}.`
+        : 'Gmail: nothing new.')
+    }
+    catch (e) { setMail(''); onError((e as Error).message) }
+    onBusy?.(0)
+    await refresh()
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <button type="button" className={ghost} disabled={mail === 'busy'} onClick={fetchMail}>
+        {mail === 'busy' ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+        {mail === 'busy' ? 'Checking Gmail…' : 'Fetch from Gmail'}
+      </button>
+      <span className="text-xs text-muted-foreground" aria-live="polite">
+        {mail === 'busy' ? 'The first time, sign in to Google in your browser.' : mail}
+      </span>
+    </div>
   )
 }
 
@@ -502,8 +511,9 @@ function Spending({ plan, setPlan }: { plan: PlanItem[]; setPlan: (p: PlanItem[]
   )
 }
 
-function Finish({ add, building, progress, result, retry }: {
-  add: boolean; building: boolean; progress: Progress; result: { ok: boolean; log?: string; dashboard?: string } | null; retry: () => void
+function Finish({ add, settings, building, progress, result, retry, api, st, refresh, onError }: {
+  add: boolean; settings: boolean; building: boolean; progress: Progress; result: { ok: boolean; log?: string; dashboard?: string } | null
+  retry: () => void; api: Api; st: State | null; refresh: () => Promise<void>; onError: (m: string) => void
 }) {
   if (building) {
     return (
@@ -517,7 +527,7 @@ function Finish({ add, building, progress, result, retry }: {
       <Frame title="Your dashboard is ready" icon={<Check className="size-5" />}
         sub="It is opening in a new browser tab. You can close this one; the setup server has stopped.">
         <p className="rounded-2xl border bg-muted/40 px-4 py-3 text-sm">
-          Next time, run <code className="num">./run.sh</code> to add new statements (or <code className="num">./run.sh --setup</code> to see this again).
+          Next time, open Statement Visualizer again to add new statements. {OPEN_APP}
           The dashboard is the file <code className="num break-all">{result.dashboard}</code>.
         </p>
       </Frame>
@@ -537,33 +547,153 @@ function Finish({ add, building, progress, result, retry }: {
       <Frame title="Ready to update" icon={<Check className="size-5" />}
         sub="Reads every statement in Statement/, new ones included, and rebuilds your dashboard.">
         <p className="rounded-2xl border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          Tired of adding statements by hand? <code className="num">./gmail.sh</code> can fetch them from Gmail by itself
-          (README, “Option 2”).
+          Tired of adding statements by hand? Statement Visualizer can fetch them from Gmail: the last step of the
+          app's Settings shows how.
         </p>
         <p className="text-xs text-muted-foreground">Press “Update my dashboard” when you are ready.</p>
       </Frame>
     )
   }
-  const steps: [string, ReactNode][] = [
-    ['Google Cloud', <>In console.cloud.google.com create a project and enable the <b>Gmail API</b>.</>],
-    ['Consent screen', <>Choose <b>External</b> and add your own Gmail as a test user.</>],
-    ['Credentials', <>Create an <b>OAuth client ID</b> of type <b>Desktop app</b>; put its ID and secret in <code className="num">.env</code> as <code className="num">GOOGLE_CLIENT_ID</code> / <code className="num">GOOGLE_CLIENT_SECRET</code>.</>],
-    ['First run', <>Run <code className="num">./gmail.sh</code> and sign in once. It downloads new statements and rebuilds the dashboard.</>],
-    ['By itself', <>Optional: set up real-time Gmail (README, “Real time”). Then the app fetches new mail the moment it arrives while it is open (needs remembered passwords).</>],
-  ]
   return (
-    <Frame title="Last thing: statements by email" icon={<Mail className="size-5" />}
-      sub="Optional, and you can do it any time. Banks email statements; Statement Visualizer can fetch them from Gmail by itself (read-only).">
-      <ol className="min-h-0 space-y-2 overflow-y-auto">
-        {steps.map(([t, text], i) => (
+    <Frame title={settings ? 'Gmail and your data' : 'Last thing: statements by email'} icon={<Mail className="size-5" />}
+      sub="Gmail is optional, and you can set it up any time. Banks email statements; Statement Visualizer can fetch them from Gmail by itself (read-only).">
+      <div className="min-h-0 space-y-4 overflow-y-auto">
+        <GmailSettings api={api} st={st} refresh={refresh} onError={onError} />
+        {settings && st && <YourData api={api} folder={st.folder} onError={onError} />}
+      </div>
+      <p className="text-xs text-muted-foreground">Press “Build my dashboard” when you are ready.</p>
+    </Frame>
+  )
+}
+
+// Gmail settings, saved into the settings file (welcome.py /api/google). Each field shows what is saved until edited;
+// the secret never comes back to the page, a blank one keeps the saved one.
+const GMAIL_STEPS: [string, ReactNode][] = [
+  ['Google Cloud', <>In <b>console.cloud.google.com</b> create a project and enable the <b>Gmail API</b>.</>],
+  ['Consent screen', <>Choose <b>External</b> and add your own Gmail as a test user.</>],
+  ['Credentials', <>Create an <b>OAuth client ID</b> of type <b>Desktop app</b>, then paste its ID and secret below and save.</>],
+  ['Sign in', <>Press <b>Fetch from Gmail</b> and sign in once. From then on the app checks Gmail each time it opens.</>],
+]
+
+function GmailSettings({ api, st, refresh, onError }: {
+  api: Api; st: State | null; refresh: () => Promise<void>; onError: (m: string) => void
+}) {
+  const [typed, setTyped] = useState<Partial<Record<keyof Google, string>>>({})
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const value = (k: keyof Google) => typed[k] ?? (k === 'secret' ? '' : st?.google?.[k] || '')
+  const field = (k: keyof Google, label: string, placeholder = '') => (
+    <label className="block space-y-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <Input type={k === 'secret' ? 'password' : 'text'} autoComplete="off" spellCheck={false} value={value(k)} placeholder={placeholder}
+        onChange={(e) => { setTyped((t) => ({ ...t, [k]: e.target.value })); setSaved(false) }} className="h-10 rounded-xl" />
+    </label>
+  )
+  const save = async () => {
+    setBusy(true)
+    try {
+      await api('/api/google', Object.fromEntries((['id', 'secret', 'project', 'topic', 'subscription'] as const).map((k) => [k, value(k)])))
+      setTyped({})
+      setSaved(true)
+      await refresh()
+    } catch (e) { onError((e as Error).message) }
+    setBusy(false)
+  }
+  return (
+    <section className="space-y-3" data-od-id="gmail-settings">
+      <ol className="space-y-2">
+        {GMAIL_STEPS.map(([t, text], i) => (
           <li key={t} className="flex gap-3 rounded-2xl border px-3 py-2.5">
             <span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand/15 text-xs font-semibold text-brand">{i + 1}</span>
             <p className="text-sm"><b className="font-medium">{t}.</b> <span className="text-muted-foreground">{text}</span></p>
           </li>
         ))}
       </ol>
-      <p className="text-xs text-muted-foreground">Full guide: README.md, “Option 2: fetch from Gmail automatically”. Press “Build my dashboard” when you are ready.</p>
-    </Frame>
+      <form className="space-y-3 rounded-2xl border p-4" onSubmit={(e) => { e.preventDefault(); save() }}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {field('id', 'Client ID', '….apps.googleusercontent.com')}
+          {field('secret', 'Client secret', st?.google?.secret ? 'Saved (leave blank to keep it)' : '')}
+        </div>
+        <details className="group">
+          <summary className="cursor-pointer text-xs text-muted-foreground">Real time (optional): new mail within seconds while the app is open</summary>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Needs a Pub/Sub topic and pull subscription in the same Google Cloud project (README, “Real time”, steps 1–5).
+            Leave these blank to keep it off.
+          </p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-3">
+            {field('project', 'Project ID')}
+            {field('topic', 'Topic')}
+            {field('subscription', 'Subscription')}
+          </div>
+        </details>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="submit" className={ghost} disabled={busy || !value('id')}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}Save Gmail settings
+          </button>
+          {saved && <span role="status" className="text-xs text-pos">Saved.</span>}
+        </div>
+      </form>
+      {st?.gmail && <GmailFetch api={api} refresh={refresh} onError={onError} />}
+    </section>
+  )
+}
+
+// Settings only: the data folder, and deleting everything (welcome.py /api/clear, launcher.py clear). After a delete
+// the app closes (the window, or the browser app's server); this page clears what it saved in the browser itself.
+function YourData({ api, folder, onError }: { api: Api; folder: string; onError: (m: string) => void }) {
+  const [asking, setAsking] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [gone, setGone] = useState(false)
+  const wipe = async () => {
+    setBusy(true)
+    try {
+      await api('/api/clear', { confirm: typed })
+      localStorage.clear()   // labels, expected spending, theme, seen rows
+      setGone(true)
+    } catch (e) { onError((e as Error).message) }
+    setBusy(false)
+  }
+  if (gone) {
+    return (
+      <p role="status" className="rounded-2xl border bg-muted/40 px-4 py-4 text-sm">
+        Everything is deleted. Statement Visualizer closes now; open it again to start fresh.
+      </p>
+    )
+  }
+  return (
+    <section className="space-y-3 rounded-2xl border p-4" data-od-id="your-data">
+      <div>
+        <p className="text-sm font-medium">Your data</p>
+        <p className="text-xs text-muted-foreground">Statements, ledger and settings stay on this computer, in <span className="num break-all">{folder}</span></p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={ghost} onClick={() => api('/api/folder', {}).catch((e) => onError(e.message))}>
+          <FolderOpen className="size-4" />Open data folder
+        </button>
+        {!asking && (
+          <button type="button" className={cn(ghost, 'text-neg')} onClick={() => setAsking(true)}>
+            <Trash2 className="size-4" />Delete all my data…
+          </button>
+        )}
+      </div>
+      {asking && (
+        <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (typed === 'DELETE') wipe() }}>
+          <p className="text-xs text-neg">
+            Deletes your statement PDFs, the ledger, expected spending, labels, saved passwords and the Gmail login. This
+            cannot be undone. Type DELETE to confirm.
+          </p>
+          <div className="flex gap-2">
+            <Input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type DELETE to confirm" autoComplete="off"
+              className="h-10 min-w-0 flex-1 rounded-xl" />
+            <button type="submit" className={cn(primary, 'bg-neg shadow-none')} disabled={typed !== 'DELETE' || busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : 'Delete'}
+            </button>
+            <button type="button" className={ghost} onClick={() => { setAsking(false); setTyped('') }}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </section>
   )
 }
 

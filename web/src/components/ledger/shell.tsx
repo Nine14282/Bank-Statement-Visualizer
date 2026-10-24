@@ -5,11 +5,11 @@ import IconButton from '@mui/material/IconButton'
 import Popover from '@mui/material/Popover'
 import MuiTooltip from '@mui/material/Tooltip'
 import { motion } from 'motion/react'
-import { Bell, Check, CircleCheck, Copy, Download, Moon, Settings, Sun, Upload } from 'lucide-react'
+import { Bell, CircleCheck, Download, Moon, Settings, Sun, Upload } from 'lucide-react'
 import { SECTIONS, goTo, type Tab } from '@/lib/nav'
 import { THEMES, type useTheme } from '@/lib/themes'
 import { META, bankName, baht, toCsv, type Tx } from '@/lib/ledger'
-import { APP, bridge, cn } from '@/lib/utils'
+import { APP, OPEN_APP, bridge, cn } from '@/lib/utils'
 
 // Icon nav: a floating vertical rail on desktop, a bottom bar on phones. The lit pill slides between items.
 export function Nav({ active, mobile }: { active: string; mobile?: boolean }) {
@@ -49,29 +49,15 @@ async function download(rows: Tx[], name: string) {
 const POP = { mt: 1, maxWidth: 'calc(100vw - 24px)', p: 2, borderRadius: '18px', bgcolor: 'var(--popover)',
   color: 'var(--popover-foreground)', border: '1px solid var(--border)' }
 
-// The command to add statements. Opened from disk (file:///…/web/dist/index.html), the project folder is in this
-// page's own address, so the hint says exactly what to type; anywhere else (dev server, a WSL host) just ./run.sh.
-const runCmd = () => {
-  const p = decodeURIComponent(location.pathname)
-  const end = /\/web\/dist\/index\.html$/
-  if (location.protocol !== 'file:' || location.host || !end.test(p)) return './run.sh'
-  return `cd '${p.replace(end, '').replace(/'/g, `'\\''`)}' && ./run.sh`
-}
-
 // "Add statements": in the app window (workspace/app.py) it opens the add page over the dashboard (onAdd, App.tsx;
 // the window's Python reads and saves the PDFs). In a browser this dashboard is a file, which can't save PDFs or read
-// them, so it says what to run: ./run.sh opens the add page, and this page reloads itself after the update.
+// them, so it sends people to the app; this page reloads itself after the update.
 function AddStatements({ onAdd }: { onAdd?: () => void }) {
   const [at, setAt] = useState<HTMLElement | null>(null)
-  const [copied, setCopied] = useState(false)
-  const cmd = runCmd()
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(cmd); setCopied(true) } catch { /* no clipboard here: the text is selectable */ }
-  }
   return (
     <>
       <button type="button" aria-label="Add statements" aria-haspopup={onAdd ? undefined : 'dialog'}
-        onClick={(e) => { if (onAdd) return onAdd(); setCopied(false); setAt(e.currentTarget) }}
+        onClick={(e) => { if (onAdd) return onAdd(); setAt(e.currentTarget) }}
         data-od-id="add-statements"
         className="flex h-11 items-center gap-2 rounded-full bg-brand px-3.5 text-sm font-medium text-white shadow-[0_8px_20px_-8px_var(--brand)] transition hover:brightness-110 active:scale-95 sm:px-4">
         <Upload className="size-4" /><span className="hidden sm:inline">Add statements</span>
@@ -80,20 +66,13 @@ function AddStatements({ onAdd }: { onAdd?: () => void }) {
         transformOrigin={{ vertical: 'top', horizontal: 'right' }} slotProps={{ paper: { sx: { ...POP, width: 380 } } }}>
         <p className="eyebrow mb-2">Add statements</p>
         <p className="text-sm text-muted-foreground">
-          Got a new statement PDF from your bank? Run this in a terminal. A page opens where you drop the PDF and type its
-          password, then this dashboard updates by itself.
+          Got a new statement PDF from your bank? Add it in the app: press Add statements there, drop the PDF and type
+          its password. This dashboard then updates by itself.
         </p>
-        <div className="mt-3 flex items-center gap-2 rounded-xl border bg-muted/50 p-1.5 pl-3">
-          <code className="num min-w-0 flex-1 select-all break-all text-xs">{cmd}</code>
-          <button type="button" onClick={copy} aria-label="Copy command"
-            className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground">
-            {copied ? <Check className="size-4 text-pos" /> : <Copy className="size-4" />}
-          </button>
-          <span role="status" className="sr-only">{copied ? 'Command copied' : ''}</span>
-        </div>
+        <p className="mt-3 text-sm">{OPEN_APP}</p>
         <p className="mt-3 text-xs text-muted-foreground">
-          Rather have them added automatically? <code className="num">./gmail.sh</code> fetches statements from Gmail
-          (README, “Option 2”).
+          Rather have them added automatically? The app can fetch statements from Gmail: the last step of its Settings
+          shows how.
         </p>
       </Popover>
     </>

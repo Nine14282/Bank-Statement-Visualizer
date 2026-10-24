@@ -11,6 +11,15 @@ export const EASE = [0.16, 1, 0.3, 1] as const
 
 // Shown in the desktop app window (workspace/app.py opens the page with ?app), not a browser tab.
 export const APP = new URLSearchParams(location.search).has('app')
+// The same app in a browser tab, for computers with no app window: served by workspace/welcome.py at ?web, which
+// answers the Add statements and Settings pages over HTTP (wizard.tsx's api) instead of the window's bridge.
+export const WEB = new URLSearchParams(location.search).has('web')
+// Either: Add statements and Settings work in this page.
+export const HOSTED = APP || WEB
+
+// Where people open the app after installing (never a terminal command): the launchers launcher.py and the Windows
+// Setup create.
+export const OPEN_APP = 'Open Statement Visualizer: the Start Menu on Windows, your app menu on Linux, or “Statement Visualizer.command” in its folder on a Mac.'
 
 // The app window's bridge to workspace/app.py's Api (pywebview): call = the setup/add page's requests (wizard.tsx),
 // save = Export CSV through a save dialog (shell.tsx), theme = the theme mode shown, for the next start's window colour

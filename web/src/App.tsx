@@ -15,7 +15,7 @@ import { TxTable } from '@/components/ledger/tx-table'
 import { MoneyMovement, MonthSpend, Overview, Payees, RecentTx, Segmented, WalletStack } from '@/components/ledger/widgets'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { LAST, META, TX, YEARS, bankName, baht, daysBetween, firstName, summarize, useLedger, type Tx } from '@/lib/ledger'
-import { APP, ARRIVE, ARRIVE_MS, EASE, cn, endArrival } from '@/lib/utils'
+import { ARRIVE, ARRIVE_MS, EASE, HOSTED, OPEN_APP, cn, endArrival } from '@/lib/utils'
 
 function Coverage() {
   const g = META.gaps
@@ -180,8 +180,8 @@ function Dashboard({ rows, year, setYear, term, setTerm, plan, onPlan }: {
 
 function EmptyState() {
   const steps: [string, React.ReactNode][] = [
-    ['Run setup', <>Run <code className="num">./run.sh</code>: a setup page opens in your browser and walks you through adding your statement PDFs.</>],
-    ['Or by hand', <>Put the PDFs in <code className="num">Statement/</code> and run <code className="num">./run.sh</code>, or <code className="num">./gmail.sh</code> to fetch them from Gmail (see the README).</>],
+    ['Open the app', OPEN_APP],
+    ['Add your statements', 'It walks you through adding your statement PDFs and their passwords.'],
     ['Reload this page', 'Your income, expenses, balance and spend rate appear here.'],
   ]
   return (
@@ -208,7 +208,7 @@ function EmptyState() {
   )
 }
 
-// ./run.sh's setup server opens this page at /?setup: show the setup wizard instead of the dashboard.
+// welcome.py --setup opens this page at /?setup: the setup wizard alone, instead of the dashboard.
 const SETUP = new URLSearchParams(location.search).has('setup')
 
 export default function App() {
@@ -224,12 +224,13 @@ export default function App() {
   }, [panel])
 
   if (SETUP) return <Wizard theme={theme} />
-  // No data yet: the app window runs the first-time setup itself; a browser tab can only say what to run.
-  if (!TX.length) return APP ? <Wizard theme={theme} mode="setup" /> : <EmptyState />
+  // No data yet: the app (window or ?web) runs the first-time setup itself; a page opened from disk can only say to
+  // open the app.
+  if (!TX.length) return HOSTED ? <Wizard theme={theme} mode="setup" /> : <EmptyState />
   return (
     <>
       <Ledger theme={theme} inert={!!panel}
-        onAdd={APP ? () => setPanel('add') : undefined} onSettings={APP ? () => setPanel('setup') : undefined} />
+        onAdd={HOSTED ? () => setPanel('add') : undefined} onSettings={HOSTED ? () => setPanel('setup') : undefined} />
       {/* closed without an update of its own: catch up on any the listener pushed meanwhile (main.tsx); after the
           panel has left the page, which the update checks for */}
       {panel && <Wizard theme={theme} mode={panel} onClose={() => { setPanel(null); setTimeout(() => (window as { __ledgerUpdate?: () => void }).__ledgerUpdate?.()) }} />}
