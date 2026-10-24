@@ -130,7 +130,6 @@ def state() -> dict:
     return {
         "banks": [{"id": b.id, "name": b.name, "saved": b.id in SAVED} for b in BANKS],
         "files": [{"name": n, **f} for n, f in FILES.items()],
-        "theme": os.environ.get("THEME", ""),
         "gmail": bool(os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")),
         # the Gmail settings for their form: the secret only as "saved or not"
         "google": {k: bool(os.environ.get(v)) if k == "secret" else os.environ.get(v, "") for k, v in GOOGLE.items()},
@@ -303,16 +302,12 @@ def clean_plan(plan) -> list:
     return out
 
 
-def finish(server, theme: str, plan) -> dict:
-    if theme:
-        if not re.fullmatch(r"[a-z0-9-]{1,30}", theme):
-            raise ValueError("Bad theme.")
-        config.save("THEME", theme)
+def finish(server, plan) -> dict:
     if plan is not None:  # the add page sends none: the saved list stays as it is
         fd = os.open(EXPECTED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(clean_plan(plan), f, ensure_ascii=False)
-        say(f"Saved your choices (theme: {theme or 'default'}, {len(clean_plan(plan))} expected-spending item(s))")
+        say(f"Saved your expected spending ({len(clean_plan(plan))} item(s))")
     say("Reading your statements and building the ledger and dashboard…")
     PROGRESS.update(stage="start", done=0, total=0)
     buf = io.StringIO()
@@ -351,8 +346,10 @@ def handle(path: str, name: str, body: bytes, server=None) -> dict | None:
     data = json.loads(body or b"{}")
     if path == "/api/remove":
         name = str(data.get("name", ""))
-        if not FILES.get(name, {}).get("uploaded"):
-            raise ValueError("Only files added in this setup can be removed here.")
+        if name not in FILES:  # only names from Statement/'s own listing: never a path from the page
+            raise ValueError("Unknown file.")
+        if not FILES[name]["uploaded"] and data.get("confirm") is not True:  # already imported: the page asks first
+            raise ValueError("Confirm removing a statement that was already there.")
         os.remove(os.path.join(STATEMENTS, name))
         del FILES[name]
         return {"ok": True}
@@ -376,7 +373,7 @@ def handle(path: str, name: str, body: bytes, server=None) -> dict | None:
             threading.Timer(2, server.shutdown).start()
         return out
     if path == "/api/finish":
-        return finish(server, str(data.get("theme", "")), data.get("plan"))
+        return finish(server, data.get("plan"))
     return None
 
 

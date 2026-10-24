@@ -177,10 +177,18 @@ def test_upload_rejects_a_non_pdf():
         welcome.upload("a.pdf", b"not a pdf")
 
 
-def test_remove_refuses_a_file_this_setup_did_not_add(uploaded):
+def test_remove_asks_before_deleting_a_file_this_setup_did_not_add(uploaded):
     with pytest.raises(ValueError):
         welcome.handle("/api/remove", "", b'{"name": "a.pdf"}')
     assert (uploaded / "a.pdf").exists()
+    welcome.handle("/api/remove", "", b'{"name": "a.pdf", "confirm": true}')
+    assert not (uploaded / "a.pdf").exists()
+    assert "a.pdf" not in welcome.FILES
+
+
+def test_remove_refuses_a_name_not_in_the_folder(uploaded):
+    with pytest.raises(ValueError):
+        welcome.handle("/api/remove", "", b'{"name": "../workspace/ledger.csv", "confirm": true}')
 
 
 # --- passwords: save replaces the KEY= line (export and duplicate lines too) and refuses a newline; a password that

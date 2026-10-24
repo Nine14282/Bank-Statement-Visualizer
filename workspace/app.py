@@ -45,7 +45,7 @@ def start_colour() -> str:
         with open(THEME_MODE, encoding="utf-8") as f:
             mode = f.read().strip()
     except OSError:
-        mode = "light" if os.environ.get("THEME") == "daylight" else "dark"
+        mode = "dark" if os.environ.get("THEME") == "midnight" else "light"
     return "#f2f2f6" if mode == "light" else "#0a080b"
 
 
@@ -345,10 +345,6 @@ def main() -> int:
             if reason:
                 raise RuntimeError(reason)
             os.environ.setdefault("QT_API", "pyqt6")  # pywebview reaches Qt through QtPy: never a system PyQt5
-            # The page reads prefers-reduced-motion: CSS keyframes, charts and count-ups stand still (DESIGN.md).
-            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-                os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "") + " --force-prefers-reduced-motion"
-            ).strip()
             from PyQt6.QtWidgets import QApplication
 
             # Same name as the launcher's .desktop file, so the dock shows the window under the launcher's icon. Also
